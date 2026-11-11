@@ -70,13 +70,13 @@ Want to make your own? Mods are small text files that point at the game's own ch
 ## Questions
 
 **Do I need the original game?**
-Yes. OpenToyStory2 contains none of the game's levels, characters, sounds, music or movies. They're all loaded from your copy when you play. Please don't ask for, or share, copies of the game.
+Yes. OpenToyStory2 contains none of the game's levels, characters, sounds, music or movies. They're all loaded from your copy when you play. Cannot host the game for legal reasons.
 
 **Is this official?**
 No. It's an unofficial project made by fans, and it isn't affiliated with or endorsed by Disney, Pixar, Traveller's Tales or Activision.
 
 **How was it made?**
-The original game's workings were studied in detail and then written again from scratch in the Rust programming language. None of the original program code is used.
+The original game's workings were reverse engineered and then written again from scratch in the Rust programming language. None of the original program code is used. Claude Opus 5.5 used extensively. 
 
 **Does it work on Mac or Linux?**
 Not yet. Windows only for now.
@@ -86,7 +86,7 @@ Please [open an issue](https://github.com/opents2-project/OpenToyStory2/issues) 
 
 ## Credits
 
-OpenToyStory2 is made by **lewiloon2k** and contributors, and inspired by [OpenMW](https://openmw.org), the open-source engine for Morrowind.
+OpenToyStory2 is made by **lewiloon2k/asmerdon** and contributors, and inspired by [OpenMW](https://openmw.org), the open-source engine for Morrowind.
 
 *Toy Story 2: Buzz Lightyear to the Rescue* was developed by Traveller's Tales and published by Activision. Toy Story and its characters are the property of Disney and Pixar.
 
