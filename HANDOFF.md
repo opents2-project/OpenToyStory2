@@ -13,7 +13,8 @@ exe functions) and `docs/formats/*.md`.
 
 | Doc | Holds |
 |---|---|
-| [README.md](README.md) | For players and newcomers: installing OpenToyStory2, playing, controls, what's in, deviations, building |
+| [README.md](README.md) | For players: what it is, getting started, controls, the mods, FAQ |
+| [docs/developing.md](docs/developing.md) | Status in detail, running from source, building the installer, what's in, deviations, tests, tools |
 | [PROJECT.md](PROJECT.md) | Ground rules, source material, architecture, roadmap, machine setup |
 | HANDOFF.md (this file) | Current state, open issues, working knowledge for agents |
 | [MODLOG.md](MODLOG.md) | Dated change history |
