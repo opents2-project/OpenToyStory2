@@ -1,8 +1,8 @@
 # OpenToyStory2
 
-**Toy Story 2: Buzz Lightyear to the Rescue, rebuilt in Rust.**
+<img src="assets/readme/logo.png" alt="OpenToyStory2 logo" width="200">
 
-<!-- Image: a banner or a wide screenshot of Andy's room -->
+**Toy Story 2: Buzz Lightyear to the Rescue, rebuilt in Rust.**
 
 OpenToyStory2 is a free, fan-made remake of the engine behind the 1999 PC game *Toy Story 2: Buzz Lightyear to the Rescue*. It plays the game you already own, the same levels, characters, music and movies, on a modern Windows PC, and adds things the original never had, like mods.
 
@@ -18,8 +18,7 @@ It doesn't include the game itself, original files can be found here (abandonwar
 - **A friendly launcher.** It finds your installed game for you, sets up the music and movies from your disc or disc image, and lets you jump straight into any level.
 - **Mods.** Play as Woody with a revolver, as one of Zurg's bouncing robots or as the giant Tin Man boss, or turn first person into a full shooter. You turn mods on and off with a tick box.
 
-<!-- Image: the launcher -->
-<!-- Image: a few in-game screenshots -->
+![The OpenToyStory2 launcher](assets/readme/ui.JPG)
 
 ## Getting started
 
@@ -38,6 +37,8 @@ Then:
 
 Your settings and mods are kept in `%APPDATA%\OpenToyStory2` and your saves in `%APPDATA%\ts2-rust`. Uninstalling leaves both behind, so you won't lose anything.
 
+![Gameplay](assets/readme/gameplay.png)
+
 ## Controls
 
 | Key | What it does |
@@ -53,9 +54,6 @@ Your settings and mods are kept in `%APPDATA%\OpenToyStory2` and your saves in `
 
 ## Mods
 
-<!-- Image: Woody with his revolver -->
-<!-- Image: first person -->
-
 Mods come with the launcher. Open the **Mods** tab, tick the ones you want and press **Play Full Game Modded**. You can also try them on a single level with the **Level Tester**.
 
 | Mod | What it does |
@@ -66,6 +64,8 @@ Mods come with the launcher. Open the **Mods** tab, tick the ones you want and p
 | **Play as the Tin Man** | Stomp around as the giant level 1 boss and knock out anything you walk into. |
 
 Want to make your own? Mods are small text files that point at the game's own characters and objects. See the [modding guide](mods/README.md).
+
+![The Play as Woody mod](assets/readme/modgameplay.png)
 
 ## Questions
 
