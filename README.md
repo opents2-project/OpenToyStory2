@@ -8,7 +8,8 @@ OpenToyStory2 is a free, fan-made remake of the engine behind the 1999 PC game *
 
 It doesn't include the game itself, original files can be found here (abandonware): https://www.myabandonware.com/game/disney-pixar-toy-story-2-buzz-lightyear-to-the-rescue-bfq
 
-**Beta.** All 15 levels can be played from start to finish, but levels 2 to 15 are still being tested and polished. Expect the odd bug.
+## **Beta.** 
+All 15 levels can be played from start to finish, but levels 2 to 15 are still being tested and polished. Expect the odd bug.
 
 ## What you get
 
