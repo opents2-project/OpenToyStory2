@@ -1,6 +1,6 @@
 # OpenToyStory2
 
-**Toy Story 2: Buzz Lightyear to the Rescue, rebuilt for today's PCs.**
+**Toy Story 2: Buzz Lightyear to the Rescue, rebuilt in Rust.**
 
 <!-- Image: a banner or a wide screenshot of Andy's room -->
 
