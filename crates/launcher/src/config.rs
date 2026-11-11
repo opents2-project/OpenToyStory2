@@ -63,7 +63,7 @@ impl Config {
             std::fs::create_dir_all(dir)?;
         }
         let body = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, format!("# OpenTS2 settings, written by the launcher.\n{body}"))
+        std::fs::write(path, format!("# OpenToyStory2 settings, written by the launcher.\n{body}"))
     }
 
     /// The ids of the enabled mods, in load order.

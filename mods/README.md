@@ -19,7 +19,7 @@ cargo run --release --bin ts2-viewer -- --mod mods\play-as-woody "%TS2_GAME_DIR%
 
 Press F to start playing. `--mod` can be repeated; later mods win when two set `[play_as]`.
 
-In the launcher: these examples are copied into `%APPDATA%\OpenTS2\mods` the first time it starts (or on Rescan). Tick one in the Mods tab and press Play Modded. Your own mods go in the same folder.
+In the launcher: these examples are copied into `%APPDATA%\OpenToyStory2\mods` the first time it starts (or on Rescan). Tick one in the Mods tab and press Play Modded. Your own mods go in the same folder.
 
 ## `[first_person]`
 

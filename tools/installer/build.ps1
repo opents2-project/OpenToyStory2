@@ -1,4 +1,4 @@
-# Builds the OpenTS2 Windows installer: target\installer\OpenTS2-<version>-setup.exe
+# Builds the OpenToyStory2 Windows installer: target\installer\OpenToyStory2-<version>-setup.exe
 #
 #   powershell -ExecutionPolicy Bypass -File tools\installer\build.ps1
 #
@@ -9,7 +9,7 @@ Set-Location $root
 
 # The launcher's version is the product version.
 $version = (Select-String -Path 'crates\launcher\Cargo.toml' -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-Write-Host "OpenTS2 $version"
+Write-Host "OpenToyStory2 $version"
 
 cargo build --release --bin opents2 --bin ts2-viewer
 if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
@@ -24,4 +24,4 @@ if (-not $iscc) { throw 'Inno Setup 6 not found: winget install JRSoftware.InnoS
 
 & $iscc /Qp "/DAppVersion=$version" 'tools\installer\opents2.iss'
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
-Get-Item "target\installer\OpenTS2-$version-setup.exe" | Select-Object FullName, Length
+Get-Item "target\installer\OpenToyStory2-$version-setup.exe" | Select-Object FullName, Length

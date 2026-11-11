@@ -1,4 +1,4 @@
-//! Embeds the OpenTS2 icon (the Pizza Planet token) in opents2.exe.
+//! Embeds the OpenToyStory2 icon (the Pizza Planet token) in opents2.exe.
 
 fn main() {
     println!("cargo:rerun-if-changed=../../assets/icon/opents2.rc");
@@ -6,5 +6,5 @@ fn main() {
     #[cfg(windows)]
     embed_resource::compile("../../assets/icon/opents2.rc", embed_resource::NONE)
         .manifest_optional()
-        .expect("embed the OpenTS2 icon");
+        .expect("embed the OpenToyStory2 icon");
 }

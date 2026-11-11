@@ -13,13 +13,13 @@ exe functions) and `docs/formats/*.md`.
 
 | Doc | Holds |
 |---|---|
-| [README.md](README.md) | For players and newcomers: installing OpenTS2, playing, controls, what's in, deviations, building |
+| [README.md](README.md) | For players and newcomers: installing OpenToyStory2, playing, controls, what's in, deviations, building |
 | [PROJECT.md](PROJECT.md) | Ground rules, source material, architecture, roadmap, machine setup |
 | HANDOFF.md (this file) | Current state, open issues, working knowledge for agents |
 | [MODLOG.md](MODLOG.md) | Dated change history |
 | [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md) | Agent working rules |
 | [docs/coverage.md](docs/coverage.md) | Per-level interaction checklist (sim / shot / user) |
-| [docs/opents2-design.md](docs/opents2-design.md) | OpenTS2: OpenMW research, launcher, installer, mod and editor data model |
+| [docs/opents2-design.md](docs/opents2-design.md) | OpenToyStory2: OpenMW research, launcher, installer, mod and editor data model |
 | [docs/formats/](docs/formats/) | File formats |
 | [docs/re/functions.md](docs/re/functions.md), [docs/re/asset-audit.md](docs/re/asset-audit.md) | Identified exe functions; the install and disc audit |
 
@@ -134,19 +134,19 @@ Every fix below comes from the original's code, has a regression test, and was m
 - The new menus, flares, shadows and the demo haven't been played.
 - Level 14's "things not animated": the user didn't say which. Rain (round 4) and the lightning flashes (round 8) are ported.
 
-### OpenTS2 (phase 1 done: launcher and installer)
-The project is distributed as **OpenTS2**, modelled on OpenMW. Design, OpenMW research and the data model for phases 2–3: [docs/opents2-design.md](docs/opents2-design.md). (The original brief is in git history: `docs/opents2-brief.md` at commit 3d75407.) The owner is going back to polishing the port; OpenTS2's next phases wait until levels 2–15 settle.
+### OpenToyStory2 (phase 1 done: launcher and installer)
+The project is distributed as **OpenToyStory2**, modelled on OpenMW. Design, OpenMW research and the data model for phases 2–3: [docs/opents2-design.md](docs/opents2-design.md). (The original brief is in git history: `docs/opents2-brief.md` at commit 3d75407.) The owner is going back to polishing the port; OpenToyStory2's next phases wait until levels 2–15 settle.
 
 - **Workspace:** the root `Cargo.toml` is now a workspace (`.` + `crates/launcher`, both default members). The engine crate `ts2` is unchanged in place; the split into `crates/engine` etc. is planned, not done.
 - **Launcher:** `crates/launcher`, binary `opents2` (egui/eframe 0.31 on the engine's wgpu 24 / winit 0.30; rfd; serde + toml). Library modules `paths`, `install`, `iso`, `config`, `mods`, `launch` hold all logic and tests; `main.rs` is the window (tabs: Play, Game Files, Mods, Level Tester, About; green ▶ Play buttons; the token in the header and large on the Play tab).
-  - Settings: `%APPDATA%\OpenTS2\opents2.toml` (`OPENTS2_HOME` overrides). Mods: `%APPDATA%\OpenTS2\mods\<id>\mod.toml`. Engine output: `last-run.log`.
+  - Settings: `%APPDATA%\OpenToyStory2\opents2.toml` (`OPENTS2_HOME` overrides). Mods: `%APPDATA%\OpenToyStory2\mods\<id>\mod.toml`. Engine output: `last-run.log`.
   - Starts `ts2-viewer` from its own folder with `TS2_GAME_DIR`/`TS2_CD_DIR` and the game folder argument; modded adds `OPENTS2_MODS` (ignored by the engine for now). No console window.
-- **Engine changes (cosmetic only):** window title "OpenTS2" and the embedded icon as the window icon (`ts2-viewer.rs`, `IconExtWindows::from_resource(1)`); `build.rs` embeds `assets/icon/opents2.rc`.
+- **Engine changes (cosmetic only):** window title "OpenToyStory2" and the embedded icon as the window icon (`ts2-viewer.rs`, `IconExtWindows::from_resource(1)`); `build.rs` embeds `assets/icon/opents2.rc`.
 - **Static CRT:** `.cargo/config.toml` adds `+crt-static` for MSVC, so no VC++ redistributable is needed. This forced one full rebuild.
-- **Disc images:** the launcher reads a `.iso` (ISO 9660 + Joliet, `crates/launcher/src/iso.rs`) and copies `audio\` + `rtlibs\` (48 files, 372 MB on the user's image) into `%APPDATA%\OpenTS2\disc` once, then uses that as the disc folder. Checked byte-identical to a 7-Zip extraction. The user's image is `C:\Users\you\Downloads\Disney-Pixar-Toy-Story-2-…\ToyStory2.iso` (`TS2_DISC_IMAGE` for the tests).
+- **Disc images:** the launcher reads a `.iso` (ISO 9660 + Joliet, `crates/launcher/src/iso.rs`) and copies `audio\` + `rtlibs\` (48 files, 372 MB on the user's image) into `%APPDATA%\OpenToyStory2\disc` once, then uses that as the disc folder. Checked byte-identical to a 7-Zip extraction. The user's image is `C:\Users\you\Downloads\Disney-Pixar-Toy-Story-2-…\ToyStory2.iso` (`TS2_DISC_IMAGE` for the tests).
 - **Icon:** the game's own Pizza Planet token as a flat 2D picture (face-on, unshaded), rotated 48° anticlockwise so the ring runs lower-left to upper-right as in game. The owner wants the 2D picture, not a 3D view. Owner-approved exception to the no-game-data rule. The token is Level 1 special 0x39 (first id in the exe's token list 0x4F0EDC) = layer 0 mesh 395 `Shape395`, 140 vertices, texture `tex16`. To regenerate: `cargo run --release --example token_model -- <game> out/token`, then `python tools/icon/make_icon.py out/token` → `assets/icon/opents2.ico` (16–256), `opents2.png`, `opents2-1024.png`, and the installer's `wizard-*.bmp`. Used for all exes (`opents2.rc`), the window icons, the launcher UI, shortcuts and the installer.
 - **Credits:** the user is credited as **lewiloon2k** (About tab, installer publisher); repository URLs keep the GitHub path.
-- **Installer:** Inno Setup 6 (installed per-user on this machine via winget). `tools/installer/build.ps1` → `target/installer/OpenTS2-0.1.0-setup.exe`. Per-user, licence/disclaimer page (`tools/installer/disclaimer.txt`), Start menu + optional desktop shortcut, uninstaller. **Open decisions for the user:** the licence for OpenTS2's own code (placeholder in disclaimer.txt; the repo has no LICENSE), whether to sign the installer.
+- **Installer:** Inno Setup 6 (installed per-user on this machine via winget). `tools/installer/build.ps1` → `target/installer/OpenToyStory2-0.1.0-setup.exe`. Per-user, licence/disclaimer page (`tools/installer/disclaimer.txt`), Start menu + optional desktop shortcut, uninstaller. **Open decisions for the user:** the licence for OpenToyStory2's own code (placeholder in disclaimer.txt; the repo has no LICENSE), whether to sign the installer.
 - **Tests:** `crates/launcher` has 8 unit tests (+1 `--ignored` full ISO copy) and 3 end-to-end tests (`tests/launch.rs`) that start the built `ts2-viewer` through the launcher's command lines with `--shot` for each route (need `TS2_GAME_DIR` and a prior release build).
 - **Not verified by the agent:** the launcher window itself (the user tests interactive windows), and taskbar icon appearance.
 - **Next:** phase 2/3 per the design doc: the VFS (route engine file reads through layers), then the editor as `opents2-editor` saving `mods/<id>/scenes/levelNN.toml`.
@@ -223,7 +223,7 @@ PROJECT.md "Machine setup". In addition, for agents:
 
 | What | Where |
 |---|---|
-| Disc media | The disc image's `Setup\Toy2\CD\audio\*.wav` (music) and `rtlibs\*.dll` (MPEG-1 movies). The ignored `ts2-media.txt` in the project folder points the engine at an extracted copy; the launcher copies its own to `%APPDATA%\OpenTS2\disc`. |
+| Disc media | The disc image's `Setup\Toy2\CD\audio\*.wav` (music) and `rtlibs\*.dll` (MPEG-1 movies). The ignored `ts2-media.txt` in the project folder points the engine at an extracted copy; the launcher copies its own to `%APPDATA%\OpenToyStory2\disc`. |
 | Decompiled output | `re/out/c/<address>.c` (2,811 functions), `re/out/functions.tsv`, `re/out/strings.tsv` |
 | Disassembler | a Python venv with `capstone` + `pefile` in the session scratchpad (`dis.py`: `dis <va> <len>` / `hex <va> <len>`; `xref.py <hex>`: every instruction mentioning an address; `floats.py <va> <n>`). Recreate it in a new session if the scratchpad is gone. |
 
@@ -273,7 +273,7 @@ places a creature.
 | `src/scene.rs`, `src/specials.rs` | Draw batches (levels, creatures, billboards, sprites, specials); run-time special-object transforms (0x4CCxxx) |
 | `src/formats/` | `ngn`, `terrain`, `leveldat`, `packets` (incl. the backdrop picture), `anim`, `exe`, `all`, `bmp` |
 | `src/bin/ts2-viewer.rs` | The viewer: rendering (sky pass, low-detail pass, detailed pass, HUD), input, audio output, token sequence and menu, glue between everything |
-| `crates/launcher/` | The OpenTS2 launcher (`opents2`); see "OpenTS2" above and docs/opents2-design.md |
+| `crates/launcher/` | The OpenToyStory2 launcher (`opents2`); see "OpenToyStory2" above and docs/opents2-design.md |
 | `assets/icon/`, `tools/icon/`, `tools/installer/` | The icon and its generator; the Inno Setup installer and its build script |
 | `examples/` | About 50 diagnostics (§9) |
 | `tests/` | Integration tests, one file per level plus systems |
@@ -521,7 +521,7 @@ shadows are the biggest unported systems.
 
 - The launcher copies the example mods once into the player's mods folder (`mods::install_examples`; source: `mods\` beside `opents2.exe`, else a source checkout's `mods\` found from `target\release`). Copied ids are kept in `opents2.toml` `examples = [...]`, so a deleted example isn't put back. They join the load order disabled.
 - Mods tab: "coming soon" note replaced; each mod shows "plays as <CREATURE>"; a warning when more than one enabled mod sets `[play_as]` (the last wins).
-- Installer: `mods\*` goes to `{app}\mods`. Rebuilt `target\installer\OpenTS2-0.1.0-setup.exe`.
+- Installer: `mods\*` goes to `{app}\mods`. Rebuilt `target\installer\OpenToyStory2-0.1.0-setup.exe`.
 - The installed copy from before has an engine without mod support: reinstall, or run `target\release\opents2.exe`. Launcher not run by the agent (owner tests).
 
 ## 2026-11-10: Tin Man at boss size, touch damage, modded level tester (main agent)

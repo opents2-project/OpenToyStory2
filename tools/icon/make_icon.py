@@ -1,4 +1,4 @@
-"""Makes the OpenTS2 icon from the game's own Pizza Planet token.
+"""Makes the OpenToyStory2 icon from the game's own Pizza Planet token.
 
 The token is Level 1's special object 0x39 (mesh Shape395, texture tex16). Export it from
 your install first, then run this:

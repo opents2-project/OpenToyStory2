@@ -43,7 +43,7 @@ pub fn plan(engine: &Path, game: &Path, cd: Option<&Path>, home: &Path, mode: &M
         env.push(("OPENTS2_MODS", std::env::join_paths(dirs).unwrap_or_default()));
     }
     // The engine also reads a `ts2-media.txt` from its working directory; start it in the
-    // OpenTS2 folder so only the launcher's settings apply.
+    // OpenToyStory2 folder so only the launcher's settings apply.
     Plan { program: engine.to_owned(), args, env, cwd: home.to_owned() }
 }
 

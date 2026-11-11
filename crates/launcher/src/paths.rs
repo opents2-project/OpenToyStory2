@@ -1,8 +1,8 @@
-//! Where OpenTS2 keeps its own files. Everything the player owns lives in one per-user
+//! Where OpenToyStory2 keeps its own files. Everything the player owns lives in one per-user
 //! folder, apart from the install (which an upgrade or uninstall replaces) and the game:
 //!
 //! ```text
-//! %APPDATA%\OpenTS2\            (Linux: $XDG_CONFIG_HOME/opents2, macOS: ~/Library/Application Support/OpenTS2)
+//! %APPDATA%\OpenToyStory2\            (Linux: $XDG_CONFIG_HOME/opents2, macOS: ~/Library/Application Support/OpenToyStory2)
 //!   opents2.toml                settings written by the launcher
 //!   mods\<id>\mod.toml          one folder per mod, with its manifest (the example mods
 //!                               are copied here once from `mods\` beside the launcher)
@@ -14,21 +14,41 @@
 //! engine keeps them (`TS2_SAVE_DIR`, else `%APPDATA%\ts2-rust`).
 use std::path::PathBuf;
 
-/// The per-user OpenTS2 folder.
+/// The per-user OpenToyStory2 folder. One left by an earlier version under the old name
+/// (OpenTS2) is moved here the first time.
 pub fn home() -> PathBuf {
     if let Some(p) = std::env::var_os("OPENTS2_HOME") {
         return p.into();
     }
+    let home = default_home();
+    if let Some(old) = old_home().filter(|o| !home.exists() && o.is_dir()) {
+        let _ = std::fs::rename(&old, &home);
+    }
+    home
+}
+
+/// Where earlier versions, called OpenTS2, kept the folder (Windows and macOS; the Linux
+/// folder was already `opents2`).
+fn old_home() -> Option<PathBuf> {
     #[cfg(windows)]
-    let base = std::env::var_os("APPDATA").map(PathBuf::from).map(|p| p.join("OpenTS2"));
+    return std::env::var_os("APPDATA").map(|p| PathBuf::from(p).join("OpenTS2"));
     #[cfg(target_os = "macos")]
-    let base = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/OpenTS2"));
+    return std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/OpenTS2"));
+    #[allow(unreachable_code)]
+    None
+}
+
+fn default_home() -> PathBuf {
+    #[cfg(windows)]
+    let base = std::env::var_os("APPDATA").map(PathBuf::from).map(|p| p.join("OpenToyStory2"));
+    #[cfg(target_os = "macos")]
+    let base = std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support/OpenToyStory2"));
     #[cfg(all(unix, not(target_os = "macos")))]
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
         .map(|p| p.join("opents2"));
-    base.unwrap_or_else(|| PathBuf::from("OpenTS2"))
+    base.unwrap_or_else(|| PathBuf::from("OpenToyStory2"))
 }
 
 pub fn config_file() -> PathBuf {
@@ -48,7 +68,7 @@ pub fn log_file() -> PathBuf {
     home().join("last-run.log")
 }
 
-/// The example mods that come with OpenTS2: `mods\` beside the launcher (the installer puts
+/// The example mods that come with OpenToyStory2: `mods\` beside the launcher (the installer puts
 /// them there), else, when running from a source checkout (`target\release\`), the
 /// checkout's `mods\` folder.
 pub fn bundled_mods_dir() -> Option<PathBuf> {

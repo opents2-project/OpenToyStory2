@@ -122,7 +122,7 @@ needs to see the new `[play_as]` key without erroring).
   Woody standing, mid-run and mid-jump; the Tin Man idle and mid-hop. Inspect them; the
   main agent checks them before reporting.
 - `mods/play-as-woody/mod.toml`, `mods/play-as-tinman/mod.toml`, `mods/README.md` (how to
-  try them: `--mod` from the repo, or copy into `%APPDATA%\OpenTS2\mods` and enable in the
+  try them: `--mod` from the repo, or copy into `%APPDATA%\OpenToyStory2\mods` and enable in the
   launcher).
 - README deviations list, HANDOFF and MODLOG updated. Nothing committed.
 

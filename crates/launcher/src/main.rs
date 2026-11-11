@@ -1,4 +1,4 @@
-//! OpenTS2 launcher: the window players start from. It finds their Toy Story 2 install,
+//! OpenToyStory2 launcher: the window players start from. It finds their Toy Story 2 install,
 //! then starts the engine (`ts2-viewer`) for the original game, the modded game or the level
 //! tester. The logic lives in the library (`opents2_launcher`); this file is the window.
 #![cfg_attr(windows, windows_subsystem = "windows")]
@@ -24,14 +24,14 @@ const ICON_PNG: &[u8] = include_bytes!("../../../assets/icon/opents2.png");
 fn main() -> eframe::Result {
     let icon = eframe::icon_data::from_png_bytes(ICON_PNG).ok();
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("OpenTS2")
+        .with_title("OpenToyStory2")
         .with_inner_size([760.0, 520.0])
         .with_min_inner_size([560.0, 420.0]);
     if let Some(icon) = icon.clone() {
         viewport = viewport.with_icon(icon);
     }
     let options = eframe::NativeOptions { viewport, ..Default::default() };
-    eframe::run_native("OpenTS2", options, Box::new(move |cc| Ok(Box::new(Launcher::new(cc, icon)))))
+    eframe::run_native("OpenToyStory2", options, Box::new(move |cc| Ok(Box::new(Launcher::new(cc, icon)))))
 }
 
 /// Music and movies being copied out of a disc image in the background.
@@ -135,7 +135,7 @@ impl Launcher {
         };
         let engine = paths::engine_exe();
         if !engine.is_file() {
-            self.status = format!("The engine is missing: {}. Reinstall OpenTS2.", engine.display());
+            self.status = format!("The engine is missing: {}. Reinstall OpenToyStory2.", engine.display());
             return;
         }
         let cd = self.disc.as_ref().map(|d| d.root.clone());
@@ -203,7 +203,7 @@ impl Launcher {
             }
             ui.vertical(|ui| {
                 ui.add_space(6.0);
-                ui.heading(egui::RichText::new("OpenTS2").size(28.0).strong());
+                ui.heading(egui::RichText::new("OpenToyStory2").size(28.0).strong());
                 ui.label(format!("An open engine for Toy Story 2 · version {VERSION}"));
             });
         });
@@ -287,7 +287,7 @@ impl Launcher {
 
     fn game_files_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading("Toy Story 2 folder");
-        ui.label("OpenTS2 plays from your own installed copy of the PC game. Nothing is copied or changed.");
+        ui.label("OpenToyStory2 plays from your own installed copy of the PC game. Nothing is copied or changed.");
         let mut changed = false;
         ui.horizontal(|ui| {
             let mut text = self.config.game_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
@@ -354,7 +354,7 @@ impl Launcher {
             (None, _, _) => {}
             (Some(_), None, Some((image, size))) if idle => {
                 let name = image.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                ui.label(format!("Found the disc image {name}. OpenTS2 needs its music and movies as files: copy them once ({} MB) into {}.", size >> 20, paths::disc_copy_dir().display()));
+                ui.label(format!("Found the disc image {name}. OpenToyStory2 needs its music and movies as files: copy them once ({} MB) into {}.", size >> 20, paths::disc_copy_dir().display()));
                 if ui.add(egui::Button::new(egui::RichText::new("Copy Music and Movies").strong())).clicked() {
                     self.start_copy();
                 }
@@ -485,7 +485,7 @@ impl Launcher {
     }
 
     fn about_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading(format!("OpenTS2 {VERSION}"));
+        ui.heading(format!("OpenToyStory2 {VERSION}"));
         ui.label("A clean-room reimplementation of Toy Story 2: Buzz Lightyear to the Rescue (PC, 1999), written in Rust.");
         ui.hyperlink_to("Source code", "https://github.com/opents2-project/OpenToyStory2");
         ui.add_space(8.0);
@@ -493,7 +493,7 @@ impl Launcher {
         ui.label(DISCLAIMER);
         ui.add_space(8.0);
         ui.label(egui::RichText::new("Credits").strong());
-        ui.label("OpenTS2 by lewiloon2k and contributors. Inspired by OpenMW.");
+        ui.label("OpenToyStory2 by lewiloon2k and contributors. Inspired by OpenMW.");
         ui.label("Built with wgpu, winit, egui, rodio, Symphonia and oxideav.");
         ui.add_space(8.0);
         ui.horizontal(|ui| {

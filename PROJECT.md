@@ -1,6 +1,6 @@
-# Toy Story 2 — Rust Rewrite / OpenTS2
+# Toy Story 2 — Rust Rewrite / OpenToyStory2
 
-A clean-room reimplementation of *Toy Story 2: Buzz Lightyear to the Rescue!* (PC, Traveller's Tales / Activision, 1999) in Rust, distributed to players as **OpenTS2**: an engine, launcher and installer that run on the player's own copy of the game, in the manner of OpenMW (Open Morrowind).
+A clean-room reimplementation of *Toy Story 2: Buzz Lightyear to the Rescue!* (PC, Traveller's Tales / Activision, 1999) in Rust, distributed to players as **OpenToyStory2**: an engine, launcher and installer that run on the player's own copy of the game, in the manner of OpenMW (Open Morrowind).
 
 This file holds what doesn't change much: the ground rules, the architecture and the roadmap. Current status and next steps are in [HANDOFF.md](HANDOFF.md); players' instructions are in [README.md](README.md); agent rules are in [AGENTS.md](AGENTS.md).
 
@@ -35,11 +35,11 @@ src/                  the engine
   bin/ts2-tool.rs     asset audit and exporters
 examples/             diagnostics (HANDOFF §9)
 tests/                integration tests against the real install
-crates/launcher/      OpenTS2 launcher (`opents2`, egui)
+crates/launcher/      OpenToyStory2 launcher (`opents2`, egui)
 assets/icon/          the Pizza Planet token icon
 tools/icon/           icon generator; tools/installer/: Inno Setup installer
 tools/ghidra/         the headless Ghidra dump script
-docs/                 formats, exe functions, coverage, OpenTS2 design
+docs/                 formats, exe functions, coverage, OpenToyStory2 design
 ```
 
 Rendering is wgpu + winit, sound rodio, movies `oxideav-mpeg12video` + Symphonia, the launcher egui (eframe on the same wgpu/winit).
@@ -51,13 +51,13 @@ Rendering is wgpu + winit, sound rodio, movies `oxideav-mpeg12video` + Symphonia
 3. **Reverse engineering:** Ghidra 12 headless dump (`tools/ghidra/DumpAround.java`) of all functions to `re/out/`; findings in `docs/re/functions.md`.
 4. **Engine and gameplay:** the viewer grew into the game: Buzz's controller, collision, creatures, every level's script, bosses, HUD, front end, saves, music and movies.
 5. **Playtesting:** Level 1 signed off; levels 2–15 through nine rounds of the owner's reports (`docs/coverage.md`).
-6. **OpenTS2 phase 1:** launcher and installer (`docs/opents2-design.md`).
+6. **OpenToyStory2 phase 1:** launcher and installer (`docs/opents2-design.md`).
 
 ## Roadmap
 
 1. **Finish the port:** sign off levels 2–15; the missing features in HANDOFF (now a few small ones: creature room gating, some light sources, the shield's slowing).
-2. **OpenTS2 0.1 release:** the installer as built now, once the port is signed off.
-3. **Modding (OpenTS2 phase 3, after the port settles):** a layered virtual file system (mods over the game's data), asset overrides, playing as other creatures, scripted behaviour. Design in `docs/opents2-design.md`.
+2. **OpenToyStory2 0.1 release:** the installer as built now, once the port is signed off.
+3. **Modding (OpenToyStory2 phase 3, after the port settles):** a layered virtual file system (mods over the game's data), asset overrides, playing as other creatures, scripted behaviour. Design in `docs/opents2-design.md`.
 4. **Level editor (phase 2):** `opents2-editor`, a free camera for placing objects, creatures, pickups and paths, saved as mod files.
 5. **Other platforms:** Linux (Flatpak) and macOS packages; the engine's default game path must stop assuming `C:\`.
 

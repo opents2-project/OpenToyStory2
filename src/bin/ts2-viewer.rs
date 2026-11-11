@@ -3340,7 +3340,7 @@ impl ApplicationHandler for Viewer {
             return;
         }
         #[allow(unused_mut)]
-        let mut attrs = Window::default_attributes().with_title("OpenTS2").with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
+        let mut attrs = Window::default_attributes().with_title("OpenToyStory2").with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
         // The Pizza Planet token embedded by build.rs (resource 1).
         #[cfg(windows)]
         {

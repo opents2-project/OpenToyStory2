@@ -1,6 +1,6 @@
-//! OpenTS2 launcher logic, kept apart from the window so it can be tested.
+//! OpenToyStory2 launcher logic, kept apart from the window so it can be tested.
 //!
-//! - [`paths`]: where OpenTS2 keeps its settings and mods, and where the engine is.
+//! - [`paths`]: where OpenToyStory2 keeps its settings and mods, and where the engine is.
 //! - [`install`]: finding and checking the player's game folder and disc folder.
 //! - [`iso`]: copying the music and movies out of a disc image.
 //! - [`config`]: the per-user settings file, `opents2.toml`.
@@ -20,7 +20,7 @@ pub mod paths;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The disclaimer shown in the launcher and the installer.
-pub const DISCLAIMER: &str = "OpenTS2 is an unofficial fan project. It is not affiliated with, \
+pub const DISCLAIMER: &str = "OpenToyStory2 is an unofficial fan project. It is not affiliated with, \
 endorsed by or connected to Disney, Pixar, Traveller's Tales or Activision. Toy Story 2 is \
-their property. OpenTS2 contains no game data: you need your own copy of the original PC game \
+their property. OpenToyStory2 contains no game data: you need your own copy of the original PC game \
 (Toy Story 2: Buzz Lightyear to the Rescue, 1999) to play.";
