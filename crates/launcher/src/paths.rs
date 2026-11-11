@@ -27,6 +27,14 @@ pub fn home() -> PathBuf {
     home
 }
 
+/// A path the settings saved inside the old OpenTS2 folder (the disc copy), moved to where
+/// that folder now is. None for any other path.
+pub fn moved_from_old_home(p: &std::path::Path) -> Option<PathBuf> {
+    let old = old_home()?;
+    let rest = p.strip_prefix(&old).ok()?;
+    Some(default_home().join(rest))
+}
+
 /// Where earlier versions, called OpenTS2, kept the folder (Windows and macOS; the Linux
 /// folder was already `opents2`).
 fn old_home() -> Option<PathBuf> {

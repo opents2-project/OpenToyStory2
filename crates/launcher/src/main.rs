@@ -78,6 +78,10 @@ impl Launcher {
             status = format!("Found Toy Story 2 at {}", found.display());
             config.game_dir = Some(found);
         }
+        // The disc copy saved under the old folder name (OpenTS2), since moved.
+        if let Some(moved) = config.cd_dir.as_deref().and_then(paths::moved_from_old_home) {
+            config.cd_dir = Some(moved);
+        }
         // Music and movies copied from a disc image earlier.
         if config.cd_dir.is_none() && install::find_disc_media(&paths::disc_copy_dir()).is_some() {
             config.cd_dir = Some(paths::disc_copy_dir());
