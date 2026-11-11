@@ -1,4 +1,4 @@
-//! Finding and checking the player's own copy of the game. Like OpenMW's wizard, OpenTS2
+//! Finding and checking the player's own copy of the game. Like OpenMW's wizard, OpenToyStory2
 //! never copies or ships the data: it records where the install is and reads it from there.
 use std::path::{Path, PathBuf};
 

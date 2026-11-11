@@ -36,7 +36,7 @@ This establishes core asset availability, not complete gameplay or every auxilia
 - `tracks.txt` is a dated directory listing (some file sizes differ from the actual
   WAVs). Do not use it as a proven per-level track mapping.
 - Both are played now: the music by `src/music.rs` (names from the exe's table 0x4ECCD8),
-  the movies by `src/fmv.rs`. Original media stays outside Git. The OpenTS2 launcher can copy
+  the movies by `src/fmv.rs`. Original media stays outside Git. The OpenToyStory2 launcher can copy
   both folders out of the ISO (`crates/launcher/src/iso.rs`).
 
 ## Verification

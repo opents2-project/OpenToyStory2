@@ -6,7 +6,7 @@ description = "Clean-room Rust reimplementation of Toy Story 2 (PC, 1999) that l
 publish = false
 build = "build.rs"
 
-# OpenTS2: the engine stays this root crate for now; the launcher (and later the editor
+# OpenToyStory2: the engine stays this root crate for now; the launcher (and later the editor
 # and modding crates) live under crates/. See docs/opents2-design.md.
 [workspace]
 members = [".", "crates/launcher"]

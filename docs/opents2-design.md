@@ -1,6 +1,6 @@
-# OpenTS2 design
+# OpenToyStory2 design
 
-OpenTS2 distributes the Rust rewrite as an open engine for Toy Story 2 that runs on the
+OpenToyStory2 distributes the Rust rewrite as an open engine for Toy Story 2 that runs on the
 player's own copy of the game, following OpenMW (Open Morrowind). This document records what
 we take from OpenMW, what we simplify, and the data model the later phases (editor, mods)
 build on. Phase 1 (launcher and installer) is built; the rest is the plan.
@@ -13,10 +13,10 @@ Sources: [file paths and config layering](https://openmw.readthedocs.io/en/lates
 [downloads and packages](https://openmw.org/downloads/),
 [source](https://gitlab.com/OpenMW/openmw).
 
-| OpenMW | What it does | OpenTS2 |
+| OpenMW | What it does | OpenToyStory2 |
 |---|---|---|
 | Separate programs: `openmw` (engine), `openmw-launcher`, `openmw-cs` (editor), `openmw-wizard` | Each tool does one job; the launcher just writes config and starts the engine | **Copy.** `ts2-viewer` (engine), `opents2` (launcher), later `opents2-editor`. The wizard's job is small for us (find a folder), so it is the launcher's *Game files* tab rather than a separate program. |
-| The wizard finds an existing Morrowind install (looks for `Morrowind.esm`) or installs from the retail CD, then imports `Morrowind.ini` | Never redistributes data; records where it is | **Copy, simplified.** Auto-detect the default install paths, browse, validate (`toy2.exe` and key `.ngn` files), and accept the disc for music and movies: a drive, a copied folder, or a `.iso`, whose `audio\` and `rtlibs\` the launcher copies once into `%APPDATA%\OpenTS2\disc` (the engine reads loose files; the VFS could later read the image in place). No install-from-CD (the retail installer does that) and nothing to import: the engine reads the exe's own tables. |
+| The wizard finds an existing Morrowind install (looks for `Morrowind.esm`) or installs from the retail CD, then imports `Morrowind.ini` | Never redistributes data; records where it is | **Copy, simplified.** Auto-detect the default install paths, browse, validate (`toy2.exe` and key `.ngn` files), and accept the disc for music and movies: a drive, a copied folder, or a `.iso`, whose `audio\` and `rtlibs\` the launcher copies once into `%APPDATA%\OpenToyStory2\disc` (the engine reads loose files; the VFS could later read the image in place). No install-from-CD (the retail installer does that) and nothing to import: the engine reads the exe's own tables. |
 | `openmw.cfg`: `data=` lines are search paths; later directories override earlier ones (a virtual file system); `content=` lines are plugins in load order | Mods are layered, never written into the game | **Copy the model.** A layered file system over the game folder with mod folders on top, in the order the player picks (§3). One list instead of two: our mods are folders, not separate plugin files inside folders. |
 | Config layering: local / global / user `openmw.cfg`, command line highest; multi-value settings merge, single values take the highest priority; the launcher writes only the user file | Defaults are never edited by the player | **Simplify.** Defaults live in code; one per-user `opents2.toml` holds only what the player chose; the launcher passes paths through the engine's command line and environment, which win. No global/local layers until something needs them. |
 | `data-local`: where the editor writes, always loaded last | The editor never writes into the game or other mods | **Copy.** The editor saves into a mod folder of its own (§4). |
@@ -68,8 +68,8 @@ It doesn't change how the engine finds data. It runs `ts2-viewer` (installed bes
 | Play modded | `ts2-viewer <game>` | as above, plus `OPENTS2_MODS=<mod dirs in load order>` (`;`-separated), which the engine ignores until the VFS exists |
 | Level tester | `ts2-viewer --level N <game>` | as above |
 
-The working directory is the OpenTS2 folder, so a stray `ts2-media.txt` elsewhere has no
-effect. The engine's output goes to `%APPDATA%\OpenTS2\last-run.log`; the launcher shows when
+The working directory is the OpenToyStory2 folder, so a stray `ts2-media.txt` elsewhere has no
+effect. The engine's output goes to `%APPDATA%\OpenToyStory2\last-run.log`; the launcher shows when
 the game stops with an error.
 
 ## 3. Data model: the layered file system
@@ -122,7 +122,7 @@ version = "1.0.0"
 authors = ["someone"]
 description = "Sharper textures for Buzz."
 requires = ["base-fixes"]       # must be enabled and load earlier
-engine = "0.1"                  # OpenTS2 version it was made for
+engine = "0.1"                  # OpenToyStory2 version it was made for
 # Phase 3 additions: conflicts = [...], optional `play_as = "WOODY"` etc.
 ```
 
@@ -132,7 +132,7 @@ folder contains, which the launcher can list.
 
 ### Load order in the settings
 
-`%APPDATA%\OpenTS2\opents2.toml` keeps the order and the enabled flags:
+`%APPDATA%\OpenToyStory2\opents2.toml` keeps the order and the enabled flags:
 
 ```toml
 [[mods]]
@@ -192,7 +192,7 @@ without custom actions. A per-user MSI with shortcuts needs registry key paths a
 workarounds in WiX. Inno produces a single `.exe`, which can be code-signed later.
 
 - Installs `opents2.exe`, `ts2-viewer.exe` and a README (the disclaimer) to
-  `%LOCALAPPDATA%\Programs\OpenTS2`.
+  `%LOCALAPPDATA%\Programs\OpenToyStory2`.
 - Uninstall removes those and the shortcuts, plus `last-run.log`; settings, mods and saves stay.
 - The executables link the C runtime statically (`.cargo/config.toml`), so there is no
   VC++ redistributable to install.

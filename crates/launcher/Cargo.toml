@@ -2,7 +2,7 @@
 name = "opents2-launcher"
 version = "0.1.0"
 edition = "2024"
-description = "OpenTS2 launcher: finds the player's Toy Story 2 install and starts the engine"
+description = "OpenToyStory2 launcher: finds the player's Toy Story 2 install and starts the engine"
 publish = false
 build = "build.rs"
 

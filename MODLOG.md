@@ -76,19 +76,19 @@ Dated history of the work, newest at the bottom. Current state is in HANDOFF.md;
 - Confirmed the slime level's laser power-up (19-polygon `Kind::Timer`, 0x53C824 = 1200) appears from the slime's third round; renamed its doc comment.
 - HANDOFF consolidated into one current-state section with open issues and next direction; dated history is now here and in git. README status refreshed. Added docs/opents2-brief.md (launcher/installer brief).
 
-## 2026-10-31 (fifth pass): OpenTS2 phase 1, launcher and installer
+## 2026-10-31 (fifth pass): OpenToyStory2 phase 1, launcher and installer
 
 - Researched OpenMW (config layering, data=/content=, wizard, launcher Data Files tab, packaging); summary and the phase 2–3 data model (layered VFS, `mod.toml`, editor scene files) in docs/opents2-design.md.
-- Workspace: root `Cargo.toml` gains `[workspace]` with `crates/launcher`. Engine crate untouched apart from the viewer's window title ("OpenTS2") and window icon, and a `build.rs` that embeds the icon. No gameplay change.
-- `crates/launcher` (`opents2`, egui/eframe 0.31 sharing the engine's wgpu/winit): game-folder detection and validation, optional disc folder (accepts the ISO's `Setup\Toy2\CD` layout), Play original / Play modded / Level tester, a Mods tab (scan, enable, order, dependency warnings; not loaded by the engine yet), About with disclaimer and credits. Settings in `%APPDATA%\OpenTS2\opents2.toml`.
+- Workspace: root `Cargo.toml` gains `[workspace]` with `crates/launcher`. Engine crate untouched apart from the viewer's window title ("OpenToyStory2") and window icon, and a `build.rs` that embeds the icon. No gameplay change.
+- `crates/launcher` (`opents2`, egui/eframe 0.31 sharing the engine's wgpu/winit): game-folder detection and validation, optional disc folder (accepts the ISO's `Setup\Toy2\CD` layout), Play original / Play modded / Level tester, a Mods tab (scan, enable, order, dependency warnings; not loaded by the engine yet), About with disclaimer and credits. Settings in `%APPDATA%\OpenToyStory2\opents2.toml`.
 - Icon: original Pizza Planet-style token drawn by `tools/icon/make_icon.py`; embedded in all executables and used as the window icon.
 - `.cargo/config.toml`: static C runtime on MSVC.
 - Installer: Inno Setup 6 script and `tools/installer/build.ps1` (per-user, licence/disclaimer page, shortcuts, uninstaller, no game files).
-- Checks: `cargo build --release` clean; `cargo test --release` 194 pass with TS2_GAME_DIR (3 new end-to-end tests start the engine via the launcher's command lines with `--shot`; shots of the startup screen and level 4 inspected). Installer built (7.4 MB); silent per-user install to a temp folder contained only opents2.exe, ts2-viewer.exe, README.txt and the uninstaller; Start-menu and desktop shortcuts created; silent uninstall removed the folder, shortcuts and registry entry and kept %APPDATA%\OpenTS2 and saves. Shipped exes import no vcruntime. Launcher window not run by the agent (the user tests windows). Nothing committed.
+- Checks: `cargo build --release` clean; `cargo test --release` 194 pass with TS2_GAME_DIR (3 new end-to-end tests start the engine via the launcher's command lines with `--shot`; shots of the startup screen and level 4 inspected). Installer built (7.4 MB); silent per-user install to a temp folder contained only opents2.exe, ts2-viewer.exe, README.txt and the uninstaller; Start-menu and desktop shortcuts created; silent uninstall removed the folder, shortcuts and registry entry and kept %APPDATA%\OpenToyStory2 and saves. Shipped exes import no vcruntime. Launcher window not run by the agent (the user tests windows). Nothing committed.
 
 ## 2026-10-31 (sixth pass): launcher feedback
 
-- Disc images: `crates/launcher/src/iso.rs` reads ISO 9660/Joliet; the Game Files tab finds a `.iso` in the disc folder (or via "Disc image…") and copies its music and movies to `%APPDATA%\OpenTS2\disc` with a progress bar. Tests: a synthetic Joliet image; the user's image (`TS2_DISC_IMAGE`, list + an `--ignored` full copy, 48 files byte-identical to 7-Zip's).
+- Disc images: `crates/launcher/src/iso.rs` reads ISO 9660/Joliet; the Game Files tab finds a `.iso` in the disc folder (or via "Disc image…") and copies its music and movies to `%APPDATA%\OpenToyStory2\disc` with a progress bar. Tests: a synthetic Joliet image; the user's image (`TS2_DISC_IMAGE`, list + an `--ignored` full copy, 48 files byte-identical to 7-Zip's).
 - Title-case buttons and tabs (Play Original, Play Modded, Level Tester, Game Files); green Play buttons, including a "▶ Play N. Level" button at the top of the Level Tester.
 - Credits name the user as lewiloon2k (About, installer publisher).
 - `examples/token_model.rs`: exports the Pizza Planet token (Level 1 special 0x39, `Shape395`, tex16) to out/ for the user's icon work. Not used in the build.
@@ -254,7 +254,7 @@ Dated history of the work, newest at the bottom. Current state is in HANDOFF.md;
 - `examples/nodes.rs`.
 
 ## 2026-11-10: launcher loads the example mods
-- Example mods ship with the installer and are copied once into `%APPDATA%\OpenTS2\mods`; Mods tab shows the play-as character and warns about two play-as mods; "coming soon" note removed.
+- Example mods ship with the installer and are copied once into `%APPDATA%\OpenToyStory2\mods`; Mods tab shows the play-as character and warns about two play-as mods; "coming soon" note removed.
 
 ## 2026-11-11: Woody's gun (0.3.0)
 - `[play_as.weapon]`: the gunslinger's revolver (GUNSL node 15, `data/level05/level1.ngn`) in Woody's right hand, following the hand's final matrix; firing returns with it (first-person stays off); shots leave the muzzle as a short yellow tracer (`laser::Bullet`) or Buzz's beam.

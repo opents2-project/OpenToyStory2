@@ -1,4 +1,4 @@
-//! Reading files out of a disc image (`.iso`), so players can point OpenTS2 at the image
+//! Reading files out of a disc image (`.iso`), so players can point OpenToyStory2 at the image
 //! they made of their disc. The engine reads loose files, so the launcher copies the music
 //! (`audio\`) and movies (`rtlibs\`) out once, as OpenMW's wizard does from a CD.
 //!

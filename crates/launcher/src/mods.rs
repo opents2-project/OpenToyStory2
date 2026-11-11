@@ -19,7 +19,7 @@
 //! authors = ["someone"]
 //! description = "Sharper textures for Buzz."
 //! requires = []          # ids of mods that must load earlier
-//! engine = "0.1"         # the OpenTS2 version it was made for
+//! engine = "0.1"         # the OpenToyStory2 version it was made for
 //! ```
 use std::path::{Path, PathBuf};
 
