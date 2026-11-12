@@ -36,10 +36,20 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
+#[path = "ts2-viewer/capture.rs"]
+mod capture;
+
 /// Game units per metre-ish; matches the OBJ exports.
 const WORLD_SCALE: f32 = 1.0 / 256.0;
 /// Offscreen screenshot size (`--shot`).
-const SHOT_SIZE: [u32; 2] = [1280, 720];
+/// `--shot`'s picture size (`--size WxH`; default 1280×720).
+static SHOT_DIM: std::sync::OnceLock<[u32; 2]> = std::sync::OnceLock::new();
+/// `--fullscreen`: open the window borderless fullscreen (F11 / Alt+Enter toggle it).
+static START_FULLSCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn shot_size() -> [u32; 2] {
+    *SHOT_DIM.get().unwrap_or(&[1280, 720])
+}
 /// No sound output (set for `--shot`).
 static SILENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Deviation (mod): the mods named by `OPENTS2_MODS` and `--mod`, loaded once at start-up.
@@ -786,6 +796,36 @@ struct Viewer {
     movie: Option<Movie>,
     movies: std::collections::VecDeque<usize>,
     movie_skip: bool,
+    /// Capture tools (deviation: tools; docs/capture.md). The view drawn in place of the
+    /// game's camera, and output frames since it was set.
+    view: Option<capture::View>,
+    view_frame: f32,
+    /// The game's own camera while another view is drawn; it comes back at the next update,
+    /// so the game (which aims the laser from it) never sees the drawn one.
+    game_cam: Option<Camera>,
+    /// F8: the director camera (the drawn view, flown with I/J/K/L, U/O, right-drag).
+    director: bool,
+    director_keys: std::collections::HashSet<KeyCode>,
+    /// F10 or `hud:off`: no HUD drawn.
+    hide_hud: bool,
+    /// An Alt key is held (for Alt+Enter).
+    alt_held: bool,
+    /// Game ticks since Buzz was put in the level.
+    ticks_run: u64,
+    /// `--record-input`: the session being recorded (armed until Buzz is put in the level).
+    recorder: Option<Recorder>,
+    /// A recording being played back (`replay:` in `--shot`): its inputs, the next to apply,
+    /// its length in ticks.
+    replay: Option<(capture::InputLog, usize, u64)>,
+}
+
+/// `--record-input <file>`: the inputs from Buzz's first spawn until play stops (F9, pause,
+/// F, game over, closing the window).
+struct Recorder {
+    path: String,
+    log: capture::InputLog,
+    on: bool,
+    done: bool,
 }
 
 /// A movie playing (`ts2::fmv`): frames from the decoder thread, the frame rate, when its
@@ -998,6 +1038,10 @@ fn follow_view(c: &ts2::camera::Camera) -> Camera {
     Camera { pos: game_to_world(c.position().to_array()), yaw: w.x.atan2(-w.z), pitch: w.y.clamp(-1.0, 1.0).asin() }
 }
 
+/// How far Buzz's drawn position closes on his real one a tick (see `Interp::smooth`): about
+/// a third of the speed's saw left, trailing him by a tick.
+const BUZZ_SMOOTH: f32 = 0.5;
+
 #[derive(Default)]
 struct Interp {
     alpha: f32,
@@ -1010,15 +1054,79 @@ struct Interp {
     cam: Option<(Camera, Camera)>,
     /// First person: the eye drawn this frame (level units), between the last two ticks.
     fp_eye: Option<[f32; 3]>,
+    /// Buzz's facing at the previous tick. His pose and facing change once a tick; on a
+    /// display faster than the 60 ticks a second (144 Hz: a tick held 2 or 3 frames) his
+    /// body judders against his position, which is drawn between ticks.
+    facing_prev: Option<i32>,
+    /// Buzz's drawn position at the previous and the latest tick (level units), smoothed
+    /// across the floor. Running, the original's speed never settles: under the top speed a
+    /// tick adds the whole acceleration, over it friction takes some off, so it saws up and
+    /// down by about 0x40 every two or three ticks. Running away from the camera that is
+    /// lost in the depth; across the view it shakes him a few pixels about 20 times a second.
+    smooth: Option<[Vec3; 2]>,
+    /// Buzz's node matrices at the previous and the latest tick, and whether a tick has run
+    /// since they were last taken.
+    pose: Option<(Vec<Option<[[f32; 4]; 4]>>, Vec<Option<[[f32; 4]; 4]>>)>,
+    ticked: bool,
 }
 
 impl Interp {
     /// Level units.
     fn buzz(&self, now: Vec3) -> Vec3 {
-        match self.buzz_prev {
-            Some(p) if p.distance(now) < 256.0 => p.lerp(now, self.alpha),
+        match (self.buzz_prev, self.smooth) {
+            (Some(p), Some([a, b])) if p.distance(now) < 256.0 && b.distance(now) < 256.0 => a.lerp(b, self.alpha),
+            (Some(p), _) if p.distance(now) < 256.0 => p.lerp(now, self.alpha),
             _ => now,
         }
+    }
+
+    /// After `ticks` ticks have left Buzz at `now` (from `before`): the drawn position follows
+    /// him across the floor, `k` of the way a tick (1: exactly); heights aren't smoothed.
+    fn smooth_buzz(&mut self, before: Vec3, now: Vec3, ticks: u32, k: f32) {
+        let mut prev = match self.smooth {
+            Some([_, n]) if n.distance(now) < 256.0 => n,
+            _ => before,
+        };
+        let mut f = prev;
+        for _ in 0..ticks {
+            f += (now - f) * k;
+        }
+        prev.y = before.y;
+        f.y = now.y;
+        self.smooth = Some([prev, f]);
+    }
+
+    /// Buzz's yaw (radians) between the last two ticks, the short way round.
+    fn facing(&self, now: i32) -> f32 {
+        let f = match self.facing_prev {
+            Some(p) => {
+                let d = ((now - p + 0x800) & 0xFFF) - 0x800;
+                p as f32 + d as f32 * self.alpha
+            }
+            None => now as f32,
+        };
+        f / 4096.0 * std::f32::consts::TAU
+    }
+
+    /// Buzz's pose `now` (this tick's node matrices), drawn between the last two ticks.
+    fn player_pose(&mut self, now: Vec<Option<[[f32; 4]; 4]>>) -> Vec<Option<[[f32; 4]; 4]>> {
+        let prev = match self.pose.take() {
+            Some((_, last)) if self.ticked && last.len() == now.len() => last,
+            Some((prev, _)) if prev.len() == now.len() => prev,
+            _ => now.clone(),
+        };
+        self.ticked = false;
+        let k = self.alpha;
+        let out = prev
+            .iter()
+            .zip(&now)
+            .map(|(a, b)| match (a, b) {
+                (Some(a), Some(b)) => Some(std::array::from_fn(|r| std::array::from_fn(|c| a[r][c] + (b[r][c] - a[r][c]) * k))),
+                (_, b) => *b,
+            })
+            .collect();
+        self.pose = Some((prev, now));
+        out
     }
 
     /// Special `id` at `now` (level units).
@@ -1093,8 +1201,8 @@ impl Gfx {
                 let config = wgpu::SurfaceConfiguration {
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    width: SHOT_SIZE[0],
-                    height: SHOT_SIZE[1],
+                    width: shot_size()[0],
+                    height: shot_size()[1],
                     present_mode: wgpu::PresentMode::Fifo,
                     desired_maximum_frame_latency: 2,
                     alpha_mode: wgpu::CompositeAlphaMode::Auto,
@@ -1102,7 +1210,7 @@ impl Gfx {
                 };
                 let target = device.create_texture(&wgpu::TextureDescriptor {
                     label: Some("shot"),
-                    size: wgpu::Extent3d { width: SHOT_SIZE[0], height: SHOT_SIZE[1], depth_or_array_layers: 1 },
+                    size: wgpu::Extent3d { width: shot_size()[0], height: shot_size()[1], depth_or_array_layers: 1 },
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
@@ -1623,12 +1731,16 @@ impl Viewer {
     }
 
     fn update(&mut self, dt: f32) {
+        if let Some(c) = self.game_cam.take() {
+            self.cam = c;
+        }
         if self.movie.is_some() || !self.movies.is_empty() {
             self.movie_update();
             return;
         }
         // Start (fresh): 0x49DFE0 pauses unless a level is ending.
         if std::mem::take(&mut self.pause_pressed) && self.pause.is_none() && self.player.is_some() && !self.level_ended && !self.out_of_lives && self.demo.is_none() {
+            self.stop_recording("paused");
             self.pause = Some(ts2::pause::Pause::new(self.volumes.0, self.volumes.1));
             if let Some(a) = self.audio.as_mut() {
                 a.play_flat(0x3D);
@@ -1770,6 +1882,7 @@ impl Viewer {
             // What the last tick started from, however many ticks this frame runs: blending
             // from further back makes a slow frame jump backwards.
             let mut buzz_before = player.pos;
+            let mut facing_before = player.facing;
             let mut specials_before: std::collections::HashMap<u16, [f32; 3]> = std::collections::HashMap::new();
             // Ticks before the last one run the camera here, on Buzz as that tick left him; the
             // last runs below, with its focus.
@@ -1787,6 +1900,7 @@ impl Viewer {
             }
             let ticks = player.update_with(&self.world, input, dt, &mut |p, w| {
                 buzz_before = p.pos;
+                facing_before = p.facing;
                 specials_before = specials.objects.iter().map(|(&id, s)| (id, s.pos)).collect();
                 if ran > 0 {
                     if let Some(c) = orig_cam.as_mut().filter(|_| follow && p.first_person == 0) {
@@ -1805,9 +1919,15 @@ impl Viewer {
                     }
                 }
             });
+            self.ticks_run += ticks as u64;
             if ticks > 0 {
                 self.interp.buzz_prev = Some(buzz_before);
+                self.interp.facing_prev = Some(facing_before);
+                // First person, the eye goes where he is.
+                let k = if player.first_person != 0 { 1.0 } else { BUZZ_SMOOTH };
+                self.interp.smooth_buzz(buzz_before, player.pos, ticks, k);
                 self.interp.specials_prev = specials_before;
+                self.interp.ticked = true;
             }
             // First person (0x4038E0) runs in place of the follow camera. Presses wait for a
             // frame that runs a tick, so a fast frame can't swallow them.
@@ -2756,6 +2876,7 @@ impl Viewer {
             let speed = if self.held(KeyCode::ShiftLeft) { 40.0 } else { 8.0 };
             self.cam.pos += v.normalize_or_zero() * speed * dt;
         }
+        self.apply_view(dt);
 
         self.anim_time += dt * ANIM_FPS * self.speed;
         if let Some(a) = self.creature_anim.get_mut(self.creature_idx) {
@@ -2836,7 +2957,7 @@ impl Viewer {
             }
         }
         if let (Some(p), Some(ci)) = (self.player.as_ref().filter(|p| p.first_person < 3 || p.first_person == 5), self.player_creature) {
-            let yaw = p.yaw() + self.player_yaw_offset;
+            let yaw = self.interp.facing(p.facing) + self.player_yaw_offset;
             match (self.anim_preview, p.anim.as_ref().and_then(|a| a.pose())) {
                 // Real move table: base layer + overlay at the frame its frame list gives.
                 // Blinking while invulnerable after a hit.
@@ -2879,7 +3000,7 @@ impl Viewer {
                         }
                         // Deviation (mod): Buzz's pose retargeted onto the substitute creature.
                         Some(pa) => {
-                            let buzz_pose = scene::layered_matrices(c.nodes.len(), layer(pose.base), layer(overlay));
+                            let buzz_pose = self.interp.player_pose(scene::layered_matrices(c.nodes.len(), layer(pose.base), layer(overlay)));
                             let matrices = pa.retarget.matrices(&buzz_pose);
                             let origin = self.interp.buzz(p.pos).to_array();
                             scene::merge(&mut batches, scene::creature_batches_matrices(&self.ngn, &pa.creature, origin, yaw, pa.scale, &matrices));
@@ -2915,17 +3036,10 @@ impl Viewer {
                                 w.muzzle.set(Some(scene::creature_point(origin, yaw, pa.scale, muzzle)));
                             }
                         }
-                        None => scene::merge(
-                            &mut batches,
-                            scene::creature_batches_layered(
-                                &self.ngn,
-                                c,
-                                self.interp.buzz(p.pos).to_array(),
-                                yaw,
-                                layer(pose.base),
-                                layer(overlay),
-                            ),
-                        ),
+                        None => {
+                            let matrices = self.interp.player_pose(scene::layered_matrices(c.nodes.len(), layer(pose.base), layer(overlay)));
+                            scene::merge(&mut batches, scene::creature_batches_matrices(&self.ngn, c, self.interp.buzz(p.pos).to_array(), yaw, 1.0, &matrices));
+                        }
                     }
                 }
                 (preview, _) => placed.push((ci, p.pos.to_array(), yaw, preview.unwrap_or(0))),
@@ -2986,9 +3100,11 @@ impl Viewer {
             // particles; only in play.
             if let (Some(p), Some((tex, size))) = (self.player.as_ref(), texture(0x1F)) {
                 let mut list = Vec::new();
-                if let Some((y, _, _, n)) = self.world.floor_below_full(p.pos.x, p.pos.z, p.pos.y - 16.0) {
+                // Under his body as drawn (between ticks, smoothed), not where the last tick left him.
+                let d = self.interp.buzz(p.pos);
+                if let Some((y, _, _, n)) = self.world.floor_below_full(d.x, d.z, d.y - 16.0) {
                     let n = n.to_array().map(|v| (v * 16384.0) as i32);
-                    let at = p.pos_obj();
+                    let at = [(d.x * 32.0) as i32, (d.y * 32.0) as i32, (d.z * 32.0) as i32];
                     ts2::shadows::on_floor(&mut list, [at[0], (y * 32.0) as i32, at[2]], 100, at[1], n);
                 }
                 if let Some(cr) = self.creatures.as_ref() {
@@ -3153,7 +3269,7 @@ impl Viewer {
         };
         // 0x44DD80: colours over 0x80 (the lightning) also lay a white wash over the screen,
         // v = c × 2 − 0x100 at alpha 0xFF − v, added to the picture.
-        let mut hud = hud;
+        let mut hud = if self.hide_hud { Vec::new() } else { hud };
         if let Some(c) = self.script.as_ref().and_then(|l| l.ambient).filter(|&c| c > 0x80) {
             hud.insert(0, ts2::flares::white_wash(c));
         }
@@ -3188,7 +3304,9 @@ impl Viewer {
     /// F: put Buzz at the level's original start (or, with Shift or no start known, onto the
     /// floor below the camera). F again returns to the free camera.
     fn toggle_play(&mut self) {
-        if self.player.take().is_some() {
+        if self.player.is_some() {
+            self.stop_recording("play stopped");
+            self.player = None;
             println!("free camera");
             return;
         }
@@ -3218,6 +3336,13 @@ impl Viewer {
         self.player = Some(player);
         self.creature_idx = ci;
         self.anim_preview = None;
+        self.ticks_run = 0;
+        let camera = if self.active_camera { "active" } else { "passive" };
+        if let Some(r) = self.recorder.as_mut().filter(|r| !r.on && !r.done) {
+            r.on = true;
+            r.log.header.push(("camera".into(), camera.into()));
+            println!("recording input to {} (F9 stops)", r.path);
+        }
         println!(
             "play mode: WASD run, Space jump (again in the air: double jump), left mouse laser (hold to charge), E spin on the ground (hold to charge) or stomp in the air, Q first person (WASD look, X target, Q back), right-drag camera, F to exit. Animations come from the original \
              move table{}; [ ] previews any animation, 0 returns to the move table",
@@ -3347,6 +3472,9 @@ impl ApplicationHandler for Viewer {
             use winit::platform::windows::IconExtWindows;
             attrs = attrs.with_window_icon(winit::window::Icon::from_resource(1, None).ok());
         }
+        if START_FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed) {
+            attrs = attrs.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+        }
         let window = Arc::new(el.create_window(attrs).expect("create window"));
         self.attach(Some(window));
     }
@@ -3361,9 +3489,191 @@ impl ApplicationHandler for Viewer {
     fn device_event(&mut self, _el: &ActiveEventLoop, _id: winit::event::DeviceId, event: DeviceEvent) {
         self.device_event_inner(event);
     }
+
+    fn exiting(&mut self, _el: &ActiveEventLoop) {
+        self.stop_recording("window closed");
+    }
 }
 
 impl Viewer {
+    /// Capture tools' keys, before the player's bindings: F7 prints the view, F8 the director
+    /// camera, F9 stops an input recording, F10 hides the HUD; while directing, I/J/K/L,
+    /// U/O and right Shift fly it. True when the key was theirs.
+    fn tool_key(&mut self, raw: KeyCode, down: bool, repeat: bool) -> bool {
+        // F11 or Alt+Enter: borderless fullscreen on the window's monitor, or back.
+        if raw == KeyCode::F11 || (self.alt_held && matches!(raw, KeyCode::Enter | KeyCode::NumpadEnter)) {
+            if down && !repeat {
+                self.toggle_fullscreen();
+            }
+            return true;
+        }
+        const FLY: [KeyCode; 7] = [KeyCode::KeyI, KeyCode::KeyJ, KeyCode::KeyK, KeyCode::KeyL, KeyCode::KeyU, KeyCode::KeyO, KeyCode::ShiftRight];
+        if self.director && FLY.contains(&raw) {
+            if down {
+                self.director_keys.insert(raw);
+            } else {
+                self.director_keys.remove(&raw);
+            }
+            return true;
+        }
+        if !matches!(raw, KeyCode::F7 | KeyCode::F8 | KeyCode::F9 | KeyCode::F10) {
+            return false;
+        }
+        if !down || repeat {
+            return true;
+        }
+        match raw {
+            KeyCode::F7 => self.print_view(),
+            KeyCode::F8 => {
+                self.director = !self.director;
+                self.director_keys.clear();
+                self.view = self.director.then(|| capture::View::Fixed(capture::Pose { pos: self.cam.pos, yaw: self.cam.yaw, pitch: self.cam.pitch }));
+                self.view_frame = 0.0;
+                println!("director camera {}", if self.director { "on: I/J/K/L fly, U/O down/up, right Shift faster, right-drag looks, F7 prints the view" } else { "off" });
+            }
+            KeyCode::F9 => self.stop_recording("F9"),
+            _ => {
+                self.hide_hud = !self.hide_hud;
+                println!("HUD {}", if self.hide_hud { "hidden" } else { "shown" });
+            }
+        }
+        true
+    }
+
+    fn toggle_fullscreen(&self) {
+        if let Some(w) = self.gfx.as_ref().and_then(|g| g.window.as_ref()) {
+            w.set_fullscreen(match w.fullscreen() {
+                Some(_) => None,
+                None => Some(winit::window::Fullscreen::Borderless(w.current_monitor())),
+            });
+        }
+    }
+
+    /// F7: the view drawn, as `--shot` words, printed and added to camera-poses.txt.
+    fn print_view(&self) {
+        let c = self.cam;
+        let mut line = format!("fix:{:.3},{:.3},{:.3},{:.4},{:.4}", c.pos.x, c.pos.y, c.pos.z, c.yaw, c.pitch);
+        if let Some(p) = self.player.as_ref() {
+            line += &format!("  tp:{:.0},{:.0},{:.0},{}  tick {}", p.pos.x, p.pos.y, p.pos.z, p.facing, self.ticks_run);
+        }
+        println!("{line}");
+        use std::io::Write;
+        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open("camera-poses.txt") {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+
+    /// One input the game is about to get, into the recording.
+    fn record(&mut self, ev: capture::Ev) {
+        let tick = self.ticks_run;
+        if self.player.is_some()
+            && let Some(r) = self.recorder.as_mut().filter(|r| r.on)
+        {
+            r.log.push(tick, ev);
+        }
+    }
+
+    fn stop_recording(&mut self, why: &str) {
+        let ticks = self.ticks_run;
+        let Some(r) = self.recorder.as_mut().filter(|r| r.on) else { return };
+        r.on = false;
+        r.done = true;
+        match fs::write(&r.path, r.log.to_text(ticks)) {
+            Ok(()) => println!("input recording stopped ({why}): {ticks} ticks ({:.1} s) written to {}", ticks as f32 / game::TICKS, r.path),
+            Err(e) => eprintln!("input recording: can't write {}: {e}", r.path),
+        }
+        if let Some(p) = self.player.as_ref() {
+            println!("buzz at {:.1?} facing {}", p.pos, p.facing);
+        }
+    }
+
+    /// Starts playing back a recording: Buzz put at the level's start, the camera mode it was
+    /// made with.
+    fn start_replay(&mut self, path: &str) -> Result<(), String> {
+        let text = fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
+        let (log, ticks) = capture::InputLog::parse(&text).map_err(|e| format!("{path}: {e}"))?;
+        if self.player.is_some() {
+            return Err("replay: Buzz is already in the level (put `replay:` before `play`)".into());
+        }
+        let mods: Vec<String> = log.header.iter().filter(|(k, _)| k == "mod").map(|(_, v)| v.clone()).collect();
+        let have: Vec<String> = MODS.get().map_or_else(Vec::new, |m| m.iter().map(|m| mod_name(&m.dir)).collect());
+        if mods != have {
+            eprintln!("replay: recorded with mods {mods:?}, running with {have:?}; it may not play out the same");
+        }
+        if let Some(l) = log.header("level") {
+            println!("replay: recorded in {l}");
+        }
+        self.active_camera = log.header("camera") != Some("passive");
+        self.toggle_play();
+        self.replay = Some((log, 0, ticks));
+        Ok(())
+    }
+
+    /// Before an update: the recording's inputs due by now. The last tick reached, the
+    /// replay ends with every key let go.
+    fn feed_replay(&mut self) {
+        let Some((log, mut next, end)) = self.replay.take() else { return };
+        while let Some(&(t, ev)) = log.events.get(next).filter(|(t, _)| *t <= self.ticks_run && *t < end) {
+            let _ = t;
+            next += 1;
+            match ev {
+                capture::Ev::Down(k) => {
+                    self.key(k);
+                    self.keys.insert(k);
+                }
+                capture::Ev::Up(k) => {
+                    self.keys.remove(&k);
+                    if k == KeyCode::ControlLeft {
+                        self.fire_held = false;
+                    }
+                }
+                capture::Ev::Lmb(b) => {
+                    self.fire_held = b && self.player.is_some();
+                    self.fire_pressed |= self.fire_held;
+                }
+                capture::Ev::Rmb(b) => self.looking = b,
+                capture::Ev::Move(dx, dy) => self.device_event_inner(DeviceEvent::MouseMotion { delta: (dx, dy) }),
+            }
+        }
+        if self.ticks_run >= end {
+            self.keys.clear();
+            self.fire_held = false;
+            self.looking = false;
+            println!("replay finished at tick {end}");
+            if let Some(p) = self.player.as_ref() {
+                println!("buzz at {:.1?} facing {}", p.pos, p.facing);
+            }
+            return;
+        }
+        self.replay = Some((log, next, end));
+    }
+
+    /// The director camera flown, then the view (director, or a script's) drawn in place of
+    /// the game's camera, which is kept for the next update.
+    fn apply_view(&mut self, dt: f32) {
+        if self.director
+            && let Some(capture::View::Fixed(p)) = self.view.as_mut()
+        {
+            let c = Camera { pos: p.pos, yaw: p.yaw, pitch: p.pitch };
+            let fwd = c.forward();
+            let right = fwd.cross(Vec3::Y).normalize_or_zero();
+            let mut v = Vec3::ZERO;
+            for (k, d) in [(KeyCode::KeyI, fwd), (KeyCode::KeyK, -fwd), (KeyCode::KeyL, right), (KeyCode::KeyJ, -right), (KeyCode::KeyO, Vec3::Y), (KeyCode::KeyU, -Vec3::Y)] {
+                if self.director_keys.contains(&k) {
+                    v += d;
+                }
+            }
+            let speed = if self.director_keys.contains(&KeyCode::ShiftRight) { 12.0 } else { 3.0 };
+            p.pos += v.normalize_or_zero() * speed * dt;
+        }
+        let Some(view) = self.view.as_ref() else { return };
+        let buzz = self.player.as_ref().map(|p| game_to_world(self.interp.buzz(p.pos).to_array()));
+        if let Some(p) = view.pose(self.view_frame, buzz) {
+            self.game_cam = Some(self.cam);
+            self.cam = Camera { pos: p.pos, yaw: p.yaw, pitch: p.pitch };
+        }
+    }
+
     /// Puts the loaded scene on the GPU, drawing into `window`.
     fn attach(&mut self, window: Option<Arc<Window>>) {
         let level = std::mem::take(&mut self.level);
@@ -3403,8 +3713,12 @@ impl Viewer {
                     g.resize(s.width, s.height);
                 }
             }
+            WindowEvent::ModifiersChanged(m) => self.alt_held = m.state().alt_key(),
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(raw) = event.physical_key {
+                    if self.tool_key(raw, event.state == ElementState::Pressed, event.repeat) {
+                        return;
+                    }
                     // The options' controller page takes the next key.
                     if event.state == ElementState::Pressed && !event.repeat && self.capture_key(raw) {
                         return;
@@ -3414,12 +3728,14 @@ impl Viewer {
                     let Some(code) = code else { return };
                     if event.state == ElementState::Pressed {
                         if !event.repeat {
+                            self.record(capture::Ev::Down(code));
                             if self.key(code) {
                                 el.exit();
                             }
                         }
                         self.keys.insert(code);
                     } else {
+                        self.record(capture::Ev::Up(code));
                         self.keys.remove(&code);
                         // The fire key held; the mouse has its own event.
                         if code == KeyCode::ControlLeft {
@@ -3428,8 +3744,12 @@ impl Viewer {
                     }
                 }
             }
-            WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => self.looking = state == ElementState::Pressed,
+            WindowEvent::MouseInput { state, button: MouseButton::Right, .. } => {
+                self.record(capture::Ev::Rmb(state == ElementState::Pressed));
+                self.looking = state == ElementState::Pressed;
+            }
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
+                self.record(capture::Ev::Lmb(state == ElementState::Pressed));
                 self.fire_held = state == ElementState::Pressed && self.player.is_some();
                 if self.fire_held {
                     self.fire_pressed = true;
@@ -3445,8 +3765,13 @@ impl Viewer {
             }
             WindowEvent::RedrawRequested => {
                 let now = Instant::now();
-                let dt = ts2::game::snap_frame_time((now - self.last).as_secs_f32().min(0.1));
+                let mut dt = ts2::game::snap_frame_time((now - self.last).as_secs_f32().min(0.1));
                 self.last = now;
+                // Recording: at most one tick a frame, so every tick follows the inputs that
+                // came before it (a slow frame slows the game a little instead).
+                if self.recorder.as_ref().is_some_and(|r| r.on) {
+                    dt = dt.min(1.0 / game::TICKS);
+                }
                 self.update(dt);
                 self.sync_cursor();
                 self.draw();
@@ -3510,25 +3835,79 @@ impl Viewer {
     /// writes the last frame as a PNG.
     fn run_shot(&mut self, shot: &Shot) {
         self.attach(None);
+        let (mut fps, mut speed) = (60.0f32, 1.0f32);
+        let mut rec = Rec::None;
         for step in &shot.script {
             match step {
                 ShotStep::Frames(n) => {
                     for _ in 0..*n {
-                        self.update(1.0 / 60.0);
+                        // At most a tick an update, the replay's inputs before each.
+                        let dt = speed / fps;
+                        let parts = (dt * game::TICKS).ceil().max(1.0) as u32;
+                        for _ in 0..parts {
+                            self.feed_replay();
+                            self.update(dt / parts as f32);
+                        }
                         if let Some(c) = shot.cam {
                             self.cam = c;
                         }
                         self.draw();
+                        rec.frame(self.gfx.as_ref());
+                        self.view_frame += 1.0;
                     }
                 }
+                ShotStep::Rec(to) => {
+                    rec.finish();
+                    rec = match to {
+                        Some(to) => Rec::start(to, fps),
+                        None => Rec::None,
+                    };
+                }
+                ShotStep::Fps(f) => fps = f.max(1.0),
+                ShotStep::Speed(s) => speed = s.max(0.0),
+                ShotStep::Hud(on) => self.hide_hud = !on,
+                ShotStep::FastForward(n) => {
+                    let end = self.ticks_run + *n as u64;
+                    let mut guard = *n as u64 * 2 + 2;
+                    while self.ticks_run < end && guard > 0 {
+                        self.feed_replay();
+                        self.update(1.0 / game::TICKS);
+                        guard -= 1;
+                    }
+                }
+                ShotStep::Replay(f) => {
+                    if let Err(e) = self.start_replay(f) {
+                        eprintln!("{e}");
+                    }
+                }
+                ShotStep::View(v) => {
+                    self.view = v.clone();
+                    self.view_frame = 0.0;
+                }
+                ShotStep::Path(ease) => {
+                    self.view = Some(capture::View::Path(capture::Path { keys: Vec::new(), ease: *ease }));
+                    self.view_frame = 0.0;
+                }
+                ShotStep::Key(f, p) => match self.view.as_mut() {
+                    Some(capture::View::Path(path)) => path.add(*f, *p),
+                    _ => {
+                        let mut path = capture::Path::default();
+                        path.add(*f, *p);
+                        self.view = Some(capture::View::Path(path));
+                        self.view_frame = 0.0;
+                    }
+                },
                 ShotStep::Press(k) => {
+                    self.record(capture::Ev::Down(*k));
                     self.key(*k);
                     self.keys.insert(*k);
                 }
                 ShotStep::Release(k) => {
+                    self.record(capture::Ev::Up(*k));
                     self.keys.remove(k);
                 }
                 ShotStep::Fire(down) => {
+                    self.record(capture::Ev::Lmb(*down));
                     self.fire_held = *down && self.player.is_some();
                     self.fire_pressed |= self.fire_held;
                 }
@@ -3569,13 +3948,16 @@ impl Viewer {
                 }
             }
         }
+        rec.finish();
+        self.stop_recording("shot ended");
+        self.feed_replay();
         self.update(1.0 / 60.0);
         if let Some(c) = shot.cam {
             self.cam = c;
         }
         self.draw();
         let Some(rgb) = self.gfx.as_ref().and_then(Gfx::capture) else { return };
-        fs::write(&shot.out, ts2::png::encode_rgb(SHOT_SIZE[0], SHOT_SIZE[1], &rgb)).expect("write shot");
+        fs::write(&shot.out, ts2::png::encode_rgb(shot_size()[0], shot_size()[1], &rgb)).expect("write shot");
         println!("shot written to {} (camera {:.1?} yaw {:.3} pitch {:.3})", shot.out, self.cam.pos, self.cam.yaw, self.cam.pitch);
         if let Some(p) = self.player.as_ref() {
             println!("buzz at {:.1?} facing {} health {} on floor {}", p.pos, p.facing, p.health, p.on_floor);
@@ -3583,6 +3965,21 @@ impl Viewer {
     }
 
     fn device_event_inner(&mut self, event: DeviceEvent) {
+        // The director camera looks round with right-drag (outside first person).
+        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event
+            && self.director
+            && self.looking
+            && self.player.as_ref().is_none_or(|p| p.first_person != 4)
+        {
+            if let Some(capture::View::Fixed(p)) = self.view.as_mut() {
+                p.yaw += dx as f32 * 0.003;
+                p.pitch = (p.pitch - dy as f32 * 0.003).clamp(-1.5, 1.5);
+            }
+            return;
+        }
+        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+            self.record(capture::Ev::Move(dx, dy));
+        }
         // First person: the mouse turns and tilts the view (0.8 units of 4096, about 0.07°, a count).
         if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event
             && self.player.as_ref().is_some_and(|p| p.first_person == 4)
@@ -3928,10 +4325,19 @@ fn play_music(a: &mut AudioOut, game: &std::path::Path, index: usize) {
     }
 }
 
+/// A mod's folder name, as recordings name it.
+fn mod_name(dir: &std::path::Path) -> String {
+    dir.file_name().map_or_else(|| dir.display().to_string(), |n| n.to_string_lossy().into_owned())
+}
+
 /// `--shot <out.png> "<script>"`: render without a window. The script's words: a number runs
-/// that many 60 Hz frames, `+Key` / `-Key` press and release a key (winit names: Space,
+/// that many output frames (60 a second unless `fps:`), `+Key` / `-Key` press and release a key (winit names: Space,
 /// Enter, Escape, ArrowUp, KeyW, …), `+Fire` / `-Fire` the left mouse button, `play` puts Buzz at the start (F), and
-/// `cam:x,y,z,yaw,pitch` holds the view there (world units, radians).
+/// `cam:x,y,z,yaw,pitch` holds the view there (world units, radians). The capture tools'
+/// words (docs/capture.md): `rec:<dir or .mp4>`, `rec:off`, `fps:n`, `speed:x`, `hud:off`,
+/// `hud:on`, `ff:ticks`, `replay:<file>`, `fix:x,y,z,yaw,pitch`, `track:x,y,z`,
+/// `follow:dx,dy,dz`, `path`, `path:ease`, `key:frame,x,y,z,yaw,pitch`,
+/// `aim:frame,x,y,z,tx,ty,tz`, `view:game`.
 struct Shot {
     out: String,
     script: Vec<ShotStep>,
@@ -3939,6 +4345,24 @@ struct Shot {
 }
 
 enum ShotStep {
+    /// `rec:<dir>` (numbered PNGs) or `rec:<file.mp4|.mkv|.mov>` (through ffmpeg); `rec:off`.
+    Rec(Option<String>),
+    /// `fps:n`: output frames a second.
+    Fps(f32),
+    /// `speed:x`: game time per output frame, as a multiple (0.25: four times slower).
+    Speed(f32),
+    /// `hud:off` / `hud:on`.
+    Hud(bool),
+    /// `ff:n`: runs n game ticks without drawing.
+    FastForward(u32),
+    /// `replay:<file>`: plays back an input recording from Buzz's spawn.
+    Replay(String),
+    /// `fix:`, `track:`, `follow:`, `view:game`: the drawn view (None: the game's camera).
+    View(Option<capture::View>),
+    /// `path` / `path:ease`: a new camera path (keys follow).
+    Path(bool),
+    /// `key:` / `aim:`: a camera path key (output frame since `path`).
+    Key(f32, capture::Pose),
     Frames(u32),
     Press(KeyCode),
     Release(KeyCode),
@@ -3984,7 +4408,35 @@ impl Shot {
                     _ => return None,
                 })
             };
-            if let Ok(n) = w.parse() {
+            let nums = |s: &str| -> Vec<f32> { s.split(',').filter_map(|x| x.parse().ok()).collect() };
+            let v3 = |v: &[f32]| Vec3::new(v[0], v[1], v[2]);
+            if let Some(r) = w.strip_prefix("rec:") {
+                shot.script.push(ShotStep::Rec((r != "off").then(|| r.to_string())));
+            } else if let Some(n) = w.strip_prefix("fps:").and_then(|n| n.parse().ok()) {
+                shot.script.push(ShotStep::Fps(n));
+            } else if let Some(n) = w.strip_prefix("speed:").and_then(|n| n.parse().ok()) {
+                shot.script.push(ShotStep::Speed(n));
+            } else if let Some(h) = w.strip_prefix("hud:") {
+                shot.script.push(ShotStep::Hud(h != "off"));
+            } else if let Some(n) = w.strip_prefix("ff:").and_then(|n| n.parse().ok()) {
+                shot.script.push(ShotStep::FastForward(n));
+            } else if let Some(f) = w.strip_prefix("replay:") {
+                shot.script.push(ShotStep::Replay(f.to_string()));
+            } else if w == "view:game" {
+                shot.script.push(ShotStep::View(None));
+            } else if let Some(v) = w.strip_prefix("fix:").map(nums).filter(|v| v.len() == 5) {
+                shot.script.push(ShotStep::View(Some(capture::View::Fixed(capture::Pose { pos: v3(&v), yaw: v[3], pitch: v[4] }))));
+            } else if let Some(v) = w.strip_prefix("track:").map(nums).filter(|v| v.len() == 3) {
+                shot.script.push(ShotStep::View(Some(capture::View::Track(v3(&v)))));
+            } else if let Some(v) = w.strip_prefix("follow:").map(nums).filter(|v| v.len() == 3) {
+                shot.script.push(ShotStep::View(Some(capture::View::Follow(v3(&v)))));
+            } else if w == "path" || w == "path:ease" {
+                shot.script.push(ShotStep::Path(w == "path:ease"));
+            } else if let Some(v) = w.strip_prefix("key:").map(nums).filter(|v| v.len() == 6) {
+                shot.script.push(ShotStep::Key(v[0], capture::Pose { pos: v3(&v[1..]), yaw: v[4], pitch: v[5] }));
+            } else if let Some(v) = w.strip_prefix("aim:").map(nums).filter(|v| v.len() == 7) {
+                shot.script.push(ShotStep::Key(v[0], capture::Pose::looking(v3(&v[1..]), v3(&v[4..]))));
+            } else if let Ok(n) = w.parse() {
                 shot.script.push(ShotStep::Frames(n));
             } else if let Some(r) = w.strip_prefix("results:") {
                 let v: Vec<i32> = r.split(',').filter_map(|x| x.parse().ok()).collect();
@@ -4025,6 +4477,80 @@ impl Shot {
     }
 }
 
+/// `rec:`: where `--shot` frames go.
+enum Rec {
+    None,
+    /// Numbered PNGs in a folder.
+    Pngs(std::path::PathBuf, u32),
+    /// Raw frames piped to ffmpeg.
+    Ffmpeg(process::Child, String, u32),
+}
+
+impl Rec {
+    fn start(to: &str, fps: f32) -> Rec {
+        let [w, h] = shot_size();
+        let lower = to.to_ascii_lowercase();
+        if [".mp4", ".mkv", ".mov"].iter().any(|e| lower.ends_with(e)) {
+            if let Some(dir) = std::path::Path::new(to).parent().filter(|d| !d.as_os_str().is_empty()) {
+                let _ = fs::create_dir_all(dir);
+            }
+            // Near-lossless H.264 for editing.
+            let child = process::Command::new("ffmpeg")
+                .args(["-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", &format!("{w}x{h}"), "-r", &fps.to_string(), "-i", "-"])
+                .args(["-c:v", "libx264", "-preset", "medium", "-crf", "12", "-pix_fmt", "yuv420p", to])
+                .stdin(process::Stdio::piped())
+                .spawn();
+            match child {
+                Ok(c) => return Rec::Ffmpeg(c, to.to_string(), 0),
+                Err(e) => {
+                    eprintln!("rec: can't start ffmpeg ({e}); writing PNGs to {to}.frames instead");
+                    return Rec::start(&format!("{to}.frames"), fps);
+                }
+            }
+        }
+        let dir = std::path::PathBuf::from(to);
+        if let Err(e) = fs::create_dir_all(&dir) {
+            eprintln!("rec: {}: {e}", dir.display());
+            return Rec::None;
+        }
+        Rec::Pngs(dir, 0)
+    }
+
+    fn frame(&mut self, gfx: Option<&Gfx>) {
+        if matches!(self, Rec::None) {
+            return;
+        }
+        let Some(rgb) = gfx.and_then(Gfx::capture) else { return };
+        let [w, h] = shot_size();
+        match self {
+            Rec::Pngs(dir, n) => {
+                let _ = fs::write(dir.join(format!("{:05}.png", *n)), ts2::png::encode_rgb(w, h, &rgb));
+                *n += 1;
+            }
+            Rec::Ffmpeg(c, _, n) => {
+                use std::io::Write;
+                if let Some(i) = c.stdin.as_mut() {
+                    let _ = i.write_all(&rgb);
+                }
+                *n += 1;
+            }
+            Rec::None => {}
+        }
+    }
+
+    fn finish(&mut self) {
+        match std::mem::replace(self, Rec::None) {
+            Rec::Pngs(dir, n) => println!("rec: {n} frames in {}", dir.display()),
+            Rec::Ffmpeg(mut c, to, n) => {
+                drop(c.stdin.take());
+                let ok = c.wait().is_ok_and(|s| s.success());
+                println!("rec: {n} frames to {to}{}", if ok { "" } else { " (ffmpeg failed)" });
+            }
+            Rec::None => {}
+        }
+    }
+}
+
 fn run(mut viewer: Viewer, shot: Option<Shot>) {
     match shot {
         Some(s) => viewer.run_shot(&s),
@@ -4038,6 +4564,35 @@ fn run(mut viewer: Viewer, shot: Option<Shot>) {
 fn main() {
     let mut args: Vec<String> = env::args().collect();
     let shot = Shot::take(&mut args);
+    // Capture tools: `--size WxH` for `--shot`, `--record-input <file>`.
+    if let Some(i) = args.iter().position(|a| a == "--size") {
+        let words: Vec<String> = args.drain(i..(i + 2).min(args.len())).collect();
+        let wh: Vec<u32> = words.get(1).map_or("", String::as_str).split(['x', 'X']).filter_map(|v| v.parse().ok()).collect();
+        match wh[..] {
+            [w, h] if w >= 16 && h >= 16 => {
+                let _ = SHOT_DIM.set([w, h]);
+            }
+            _ => {
+                eprintln!("--size requires WIDTHxHEIGHT, e.g. 1920x1080");
+                process::exit(2);
+            }
+        }
+    }
+    if let Some(i) = args.iter().position(|a| a == "--fullscreen") {
+        args.remove(i);
+        START_FULLSCREEN.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    let mut record_input = None;
+    if let Some(i) = args.iter().position(|a| a == "--record-input") {
+        let words: Vec<String> = args.drain(i..(i + 2).min(args.len())).collect();
+        match words.get(1) {
+            Some(f) => record_input = Some(f.clone()),
+            None => {
+                eprintln!("--record-input requires a file");
+                process::exit(2);
+            }
+        }
+    }
     // Deviation (mod): `--mod <dir>` (repeatable) and OPENTS2_MODS.
     let mut mod_args = Vec::new();
     while let Some(i) = args.iter().position(|a| a == "--mod") {
@@ -4091,6 +4646,9 @@ fn main() {
         _ => None,
     };
     if let Some(game) = front_game {
+        if record_input.is_some() {
+            eprintln!("--record-input works in a level opened directly (a level.ngn path or --level N), not from the front end");
+        }
         let exe = fs::read(game.join("toy2.exe")).ok().and_then(|b| exe::Exe::parse(b).ok()).unwrap_or_else(|| {
             eprintln!("toy2.exe not found in {}", game.display());
             process::exit(1);
@@ -4125,6 +4683,18 @@ fn main() {
         l.abilities = 0xFF;
         // (Unset is marked 0xFF too; this makes the first tick open the gates.)
         viewer.abilities_shown = 0;
+    }
+    if let Some(path) = record_input.clone() {
+        let mut log = capture::InputLog::default();
+        let level = std::path::Path::new(&args[1]);
+        // The level by its folder and file (data\levelNN\level.ngn), not the whole path.
+        let short: Vec<String> = level.iter().rev().take(3).map(|s| s.to_string_lossy().into_owned()).collect::<Vec<_>>().into_iter().rev().collect();
+        log.header.push(("level".into(), short.join("/")));
+        for m in MODS.get().into_iter().flatten() {
+            log.header.push(("mod".into(), mod_name(&m.dir)));
+        }
+        viewer.recorder = Some(Recorder { path, log, on: false, done: false });
+        println!("--record-input: recording starts when Buzz is put in the level (F)");
     }
     run(viewer, shot);
 }
@@ -4455,6 +5025,16 @@ fn load(path: &str, creature: Option<&str>) -> Result<Viewer, String> {
         movie: None,
         movies: std::collections::VecDeque::new(),
         movie_skip: false,
+        view: None,
+        view_frame: 0.0,
+        game_cam: None,
+        director: false,
+        director_keys: Default::default(),
+        hide_hud: false,
+        alt_held: false,
+        ticks_run: 0,
+        recorder: None,
+        replay: None,
         level_ended: false,
     };
     // The first-person helmet and arms only show in first person.

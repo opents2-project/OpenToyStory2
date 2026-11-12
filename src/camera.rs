@@ -62,6 +62,11 @@ pub struct Camera {
     /// Aim: yaw (+0x22) and pitch (+0x20) the camera looks along.
     pub look_yaw: i32,
     pub look_pitch: i32,
+    /// Deviation (smoothness): the same aim without the whole-step rounding, drawn in its
+    /// place. The original's aim moves in steps of 1/4096 of a turn (about 3 pixels across a
+    /// 1080p view), and while Buzz crosses a still camera (passive mode) those steps come
+    /// unevenly, so he judders on screen. Yaw and pitch, in 1/4096 turns.
+    aim: [f32; 2],
     /// Ticks Buzz has stood still (0x50A534) and the swing rate it set (0x50A4E4).
     idle: i32,
     swing: i32,
@@ -91,7 +96,7 @@ impl Camera {
         let b = obj_pos(buzz);
         let f = buzz.facing;
         let pos = [b[0] + ((sin12(f - 0x800) * 4) * DISTANCE >> 9), b[1] - 0x3200, b[2] + ((sin12(f - 0x400) * 4) * DISTANCE >> 9)];
-        Camera { pos, height_target: b[1], height: b[1], yaw: f, pitch: REST_PITCH, distance: DISTANCE, look_yaw: f, look_pitch: 0, idle: 0, swing: 0, focus: None, ride: 0, whisker: 0, whisker_rate: 0, passive: false, pad: 0, prev_pad: 0, turn_buzz: 0, target_distance: DISTANCE }
+        Camera { pos, height_target: b[1], height: b[1], yaw: f, pitch: REST_PITCH, distance: DISTANCE, look_yaw: f, look_pitch: 0, aim: [f as f32, 0.0], idle: 0, swing: 0, focus: None, ride: 0, whisker: 0, whisker_rate: 0, passive: false, pad: 0, prev_pad: 0, turn_buzz: 0, target_distance: DISTANCE }
     }
 
     /// One game tick.
@@ -231,10 +236,18 @@ impl Camera {
         let (dx, dy, dz) = ((b[0] - self.pos[0]) as f64, ((b[1] - 0x1800) - self.pos[1]) as f64, (b[2] - self.pos[2]) as f64);
         let want_yaw = ((dx.atan2(dz) / std::f64::consts::TAU * 4096.0).round() as i32) & 0xFFF;
         // This pitch runs the opposite way to +0x20's, so the shake is taken off.
-        let want_pitch = ((-dy).atan2(dx.hypot(dz)) / std::f64::consts::TAU * 4096.0).round() as i32 - shake_wobble(world);
+        let wobble = shake_wobble(world);
+        let want_pitch = ((-dy).atan2(dx.hypot(dz)) / std::f64::consts::TAU * 4096.0).round() as i32 - wobble;
         let half = (LAG / 2).max(1);
         self.look_yaw = if snap { want_yaw } else { (self.look_yaw + diff12(want_yaw, self.look_yaw) / half) & 0xFFF };
         self.look_pitch += diff12(want_pitch & 0xFFF, self.look_pitch & 0xFFF) / half;
+        let turn = |r: f64| (r / std::f64::consts::TAU * 4096.0) as f32;
+        let want = [turn(dx.atan2(dz)), turn((-dy).atan2(dx.hypot(dz))) - wobble as f32];
+        let wrap = |d: f32| (d + 2048.0).rem_euclid(4096.0) - 2048.0;
+        for k in 0..2 {
+            self.aim[k] = if snap && k == 0 { want[k] } else { self.aim[k] + wrap(want[k] - self.aim[k]) / half as f32 };
+        }
+        self.aim[0] = self.aim[0].rem_euclid(4096.0);
         // Moving: gone through a wall (0x48D530 → 0x48C030: the first face on the way to Buzz
         // is crossed from behind), the part behind it comes off the distance, and when it's
         // near the camera comes straight back to the wall.
@@ -377,7 +390,7 @@ impl Camera {
 
     /// Unit view direction in game space (+Y down).
     pub fn forward(&self) -> Vec3 {
-        let (y, p) = (self.look_yaw as f32 / 4096.0 * std::f32::consts::TAU, self.look_pitch as f32 / 4096.0 * std::f32::consts::TAU);
+        let (y, p) = (self.aim[0] / 4096.0 * std::f32::consts::TAU, self.aim[1] / 4096.0 * std::f32::consts::TAU);
         Vec3::new(y.sin() * p.cos(), -p.sin(), y.cos() * p.cos())
     }
 }
@@ -522,6 +535,35 @@ mod mode_tests {
         c.pad = 0x1000;
         c.tick(&p, &w);
         assert_eq!(c.yaw, p.facing);
+    }
+
+    /// Deviation (smoothness): Buzz running across a still (passive) camera, the aim drawn
+    /// turns evenly from tick to tick; the original's whole steps came 0, 1, 0, 0, 1.
+    #[test]
+    fn passive_aim_turns_smoothly() {
+        let (mut p, w, mut c) = standing();
+        c.passive = true;
+        for _ in 0..60 {
+            p.tick(&w, [0.0; 2], false, false);
+            c.tick(&p, &w);
+        }
+        let yaw = |c: &Camera| {
+            let f = c.forward();
+            f.x.atan2(f.z) / std::f32::consts::TAU * 4096.0
+        };
+        let mut last = yaw(&c);
+        let mut steps = Vec::new();
+        for _ in 0..90 {
+            p.tick(&w, [1.0, 0.0], false, false);
+            c.tick(&p, &w);
+            let y = yaw(&c);
+            steps.push((y - last + 2048.0).rem_euclid(4096.0) - 2048.0);
+            last = y;
+        }
+        assert!(steps.iter().any(|s| s.abs() > 2.0), "the camera followed him {steps:?}");
+        for s in steps.windows(2) {
+            assert!((s[1] - s[0]).abs() < 0.5, "even steps {steps:?}");
+        }
     }
 
     /// Auto: the same button turns Buzz instead.
