@@ -44,6 +44,8 @@ const WORLD_SCALE: f32 = 1.0 / 256.0;
 /// Offscreen screenshot size (`--shot`).
 /// `--shot`'s picture size (`--size WxH`; default 1280×720).
 static SHOT_DIM: std::sync::OnceLock<[u32; 2]> = std::sync::OnceLock::new();
+/// `--fullscreen`: open the window borderless fullscreen (F11 / Alt+Enter toggle it).
+static START_FULLSCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn shot_size() -> [u32; 2] {
     *SHOT_DIM.get().unwrap_or(&[1280, 720])
@@ -806,6 +808,8 @@ struct Viewer {
     director_keys: std::collections::HashSet<KeyCode>,
     /// F10 or `hud:off`: no HUD drawn.
     hide_hud: bool,
+    /// An Alt key is held (for Alt+Enter).
+    alt_held: bool,
     /// Game ticks since Buzz was put in the level.
     ticks_run: u64,
     /// `--record-input`: the session being recorded (armed until Buzz is put in the level).
@@ -3468,6 +3472,9 @@ impl ApplicationHandler for Viewer {
             use winit::platform::windows::IconExtWindows;
             attrs = attrs.with_window_icon(winit::window::Icon::from_resource(1, None).ok());
         }
+        if START_FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed) {
+            attrs = attrs.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+        }
         let window = Arc::new(el.create_window(attrs).expect("create window"));
         self.attach(Some(window));
     }
@@ -3493,6 +3500,13 @@ impl Viewer {
     /// camera, F9 stops an input recording, F10 hides the HUD; while directing, I/J/K/L,
     /// U/O and right Shift fly it. True when the key was theirs.
     fn tool_key(&mut self, raw: KeyCode, down: bool, repeat: bool) -> bool {
+        // F11 or Alt+Enter: borderless fullscreen on the window's monitor, or back.
+        if raw == KeyCode::F11 || (self.alt_held && matches!(raw, KeyCode::Enter | KeyCode::NumpadEnter)) {
+            if down && !repeat {
+                self.toggle_fullscreen();
+            }
+            return true;
+        }
         const FLY: [KeyCode; 7] = [KeyCode::KeyI, KeyCode::KeyJ, KeyCode::KeyK, KeyCode::KeyL, KeyCode::KeyU, KeyCode::KeyO, KeyCode::ShiftRight];
         if self.director && FLY.contains(&raw) {
             if down {
@@ -3524,6 +3538,15 @@ impl Viewer {
             }
         }
         true
+    }
+
+    fn toggle_fullscreen(&self) {
+        if let Some(w) = self.gfx.as_ref().and_then(|g| g.window.as_ref()) {
+            w.set_fullscreen(match w.fullscreen() {
+                Some(_) => None,
+                None => Some(winit::window::Fullscreen::Borderless(w.current_monitor())),
+            });
+        }
     }
 
     /// F7: the view drawn, as `--shot` words, printed and added to camera-poses.txt.
@@ -3690,6 +3713,7 @@ impl Viewer {
                     g.resize(s.width, s.height);
                 }
             }
+            WindowEvent::ModifiersChanged(m) => self.alt_held = m.state().alt_key(),
             WindowEvent::KeyboardInput { event, .. } => {
                 if let PhysicalKey::Code(raw) = event.physical_key {
                     if self.tool_key(raw, event.state == ElementState::Pressed, event.repeat) {
@@ -4554,6 +4578,10 @@ fn main() {
             }
         }
     }
+    if let Some(i) = args.iter().position(|a| a == "--fullscreen") {
+        args.remove(i);
+        START_FULLSCREEN.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     let mut record_input = None;
     if let Some(i) = args.iter().position(|a| a == "--record-input") {
         let words: Vec<String> = args.drain(i..(i + 2).min(args.len())).collect();
@@ -5003,6 +5031,7 @@ fn load(path: &str, creature: Option<&str>) -> Result<Viewer, String> {
         director: false,
         director_keys: Default::default(),
         hide_hud: false,
+        alt_held: false,
         ticks_run: 0,
         recorder: None,
         replay: None,
