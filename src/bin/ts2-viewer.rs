@@ -998,6 +998,10 @@ fn follow_view(c: &ts2::camera::Camera) -> Camera {
     Camera { pos: game_to_world(c.position().to_array()), yaw: w.x.atan2(-w.z), pitch: w.y.clamp(-1.0, 1.0).asin() }
 }
 
+/// How far Buzz's drawn position closes on his real one a tick (see `Interp::smooth`): about
+/// a third of the speed's saw left, trailing him by a tick.
+const BUZZ_SMOOTH: f32 = 0.5;
+
 #[derive(Default)]
 struct Interp {
     alpha: f32,
@@ -1010,15 +1014,79 @@ struct Interp {
     cam: Option<(Camera, Camera)>,
     /// First person: the eye drawn this frame (level units), between the last two ticks.
     fp_eye: Option<[f32; 3]>,
+    /// Buzz's facing at the previous tick. His pose and facing change once a tick; on a
+    /// display faster than the 60 ticks a second (144 Hz: a tick held 2 or 3 frames) his
+    /// body judders against his position, which is drawn between ticks.
+    facing_prev: Option<i32>,
+    /// Buzz's drawn position at the previous and the latest tick (level units), smoothed
+    /// across the floor. Running, the original's speed never settles: under the top speed a
+    /// tick adds the whole acceleration, over it friction takes some off, so it saws up and
+    /// down by about 0x40 every two or three ticks. Running away from the camera that is
+    /// lost in the depth; across the view it shakes him a few pixels about 20 times a second.
+    smooth: Option<[Vec3; 2]>,
+    /// Buzz's node matrices at the previous and the latest tick, and whether a tick has run
+    /// since they were last taken.
+    pose: Option<(Vec<Option<[[f32; 4]; 4]>>, Vec<Option<[[f32; 4]; 4]>>)>,
+    ticked: bool,
 }
 
 impl Interp {
     /// Level units.
     fn buzz(&self, now: Vec3) -> Vec3 {
-        match self.buzz_prev {
-            Some(p) if p.distance(now) < 256.0 => p.lerp(now, self.alpha),
+        match (self.buzz_prev, self.smooth) {
+            (Some(p), Some([a, b])) if p.distance(now) < 256.0 && b.distance(now) < 256.0 => a.lerp(b, self.alpha),
+            (Some(p), _) if p.distance(now) < 256.0 => p.lerp(now, self.alpha),
             _ => now,
         }
+    }
+
+    /// After `ticks` ticks have left Buzz at `now` (from `before`): the drawn position follows
+    /// him across the floor, `k` of the way a tick (1: exactly); heights aren't smoothed.
+    fn smooth_buzz(&mut self, before: Vec3, now: Vec3, ticks: u32, k: f32) {
+        let mut prev = match self.smooth {
+            Some([_, n]) if n.distance(now) < 256.0 => n,
+            _ => before,
+        };
+        let mut f = prev;
+        for _ in 0..ticks {
+            f += (now - f) * k;
+        }
+        prev.y = before.y;
+        f.y = now.y;
+        self.smooth = Some([prev, f]);
+    }
+
+    /// Buzz's yaw (radians) between the last two ticks, the short way round.
+    fn facing(&self, now: i32) -> f32 {
+        let f = match self.facing_prev {
+            Some(p) => {
+                let d = ((now - p + 0x800) & 0xFFF) - 0x800;
+                p as f32 + d as f32 * self.alpha
+            }
+            None => now as f32,
+        };
+        f / 4096.0 * std::f32::consts::TAU
+    }
+
+    /// Buzz's pose `now` (this tick's node matrices), drawn between the last two ticks.
+    fn player_pose(&mut self, now: Vec<Option<[[f32; 4]; 4]>>) -> Vec<Option<[[f32; 4]; 4]>> {
+        let prev = match self.pose.take() {
+            Some((_, last)) if self.ticked && last.len() == now.len() => last,
+            Some((prev, _)) if prev.len() == now.len() => prev,
+            _ => now.clone(),
+        };
+        self.ticked = false;
+        let k = self.alpha;
+        let out = prev
+            .iter()
+            .zip(&now)
+            .map(|(a, b)| match (a, b) {
+                (Some(a), Some(b)) => Some(std::array::from_fn(|r| std::array::from_fn(|c| a[r][c] + (b[r][c] - a[r][c]) * k))),
+                (_, b) => *b,
+            })
+            .collect();
+        self.pose = Some((prev, now));
+        out
     }
 
     /// Special `id` at `now` (level units).
@@ -1770,6 +1838,7 @@ impl Viewer {
             // What the last tick started from, however many ticks this frame runs: blending
             // from further back makes a slow frame jump backwards.
             let mut buzz_before = player.pos;
+            let mut facing_before = player.facing;
             let mut specials_before: std::collections::HashMap<u16, [f32; 3]> = std::collections::HashMap::new();
             // Ticks before the last one run the camera here, on Buzz as that tick left him; the
             // last runs below, with its focus.
@@ -1787,6 +1856,7 @@ impl Viewer {
             }
             let ticks = player.update_with(&self.world, input, dt, &mut |p, w| {
                 buzz_before = p.pos;
+                facing_before = p.facing;
                 specials_before = specials.objects.iter().map(|(&id, s)| (id, s.pos)).collect();
                 if ran > 0 {
                     if let Some(c) = orig_cam.as_mut().filter(|_| follow && p.first_person == 0) {
@@ -1807,7 +1877,12 @@ impl Viewer {
             });
             if ticks > 0 {
                 self.interp.buzz_prev = Some(buzz_before);
+                self.interp.facing_prev = Some(facing_before);
+                // First person, the eye goes where he is.
+                let k = if player.first_person != 0 { 1.0 } else { BUZZ_SMOOTH };
+                self.interp.smooth_buzz(buzz_before, player.pos, ticks, k);
                 self.interp.specials_prev = specials_before;
+                self.interp.ticked = true;
             }
             // First person (0x4038E0) runs in place of the follow camera. Presses wait for a
             // frame that runs a tick, so a fast frame can't swallow them.
@@ -2836,7 +2911,7 @@ impl Viewer {
             }
         }
         if let (Some(p), Some(ci)) = (self.player.as_ref().filter(|p| p.first_person < 3 || p.first_person == 5), self.player_creature) {
-            let yaw = p.yaw() + self.player_yaw_offset;
+            let yaw = self.interp.facing(p.facing) + self.player_yaw_offset;
             match (self.anim_preview, p.anim.as_ref().and_then(|a| a.pose())) {
                 // Real move table: base layer + overlay at the frame its frame list gives.
                 // Blinking while invulnerable after a hit.
@@ -2879,7 +2954,7 @@ impl Viewer {
                         }
                         // Deviation (mod): Buzz's pose retargeted onto the substitute creature.
                         Some(pa) => {
-                            let buzz_pose = scene::layered_matrices(c.nodes.len(), layer(pose.base), layer(overlay));
+                            let buzz_pose = self.interp.player_pose(scene::layered_matrices(c.nodes.len(), layer(pose.base), layer(overlay)));
                             let matrices = pa.retarget.matrices(&buzz_pose);
                             let origin = self.interp.buzz(p.pos).to_array();
                             scene::merge(&mut batches, scene::creature_batches_matrices(&self.ngn, &pa.creature, origin, yaw, pa.scale, &matrices));
@@ -2915,17 +2990,10 @@ impl Viewer {
                                 w.muzzle.set(Some(scene::creature_point(origin, yaw, pa.scale, muzzle)));
                             }
                         }
-                        None => scene::merge(
-                            &mut batches,
-                            scene::creature_batches_layered(
-                                &self.ngn,
-                                c,
-                                self.interp.buzz(p.pos).to_array(),
-                                yaw,
-                                layer(pose.base),
-                                layer(overlay),
-                            ),
-                        ),
+                        None => {
+                            let matrices = self.interp.player_pose(scene::layered_matrices(c.nodes.len(), layer(pose.base), layer(overlay)));
+                            scene::merge(&mut batches, scene::creature_batches_matrices(&self.ngn, c, self.interp.buzz(p.pos).to_array(), yaw, 1.0, &matrices));
+                        }
                     }
                 }
                 (preview, _) => placed.push((ci, p.pos.to_array(), yaw, preview.unwrap_or(0))),
@@ -2986,9 +3054,11 @@ impl Viewer {
             // particles; only in play.
             if let (Some(p), Some((tex, size))) = (self.player.as_ref(), texture(0x1F)) {
                 let mut list = Vec::new();
-                if let Some((y, _, _, n)) = self.world.floor_below_full(p.pos.x, p.pos.z, p.pos.y - 16.0) {
+                // Under his body as drawn (between ticks, smoothed), not where the last tick left him.
+                let d = self.interp.buzz(p.pos);
+                if let Some((y, _, _, n)) = self.world.floor_below_full(d.x, d.z, d.y - 16.0) {
                     let n = n.to_array().map(|v| (v * 16384.0) as i32);
-                    let at = p.pos_obj();
+                    let at = [(d.x * 32.0) as i32, (d.y * 32.0) as i32, (d.z * 32.0) as i32];
                     ts2::shadows::on_floor(&mut list, [at[0], (y * 32.0) as i32, at[2]], 100, at[1], n);
                 }
                 if let Some(cr) = self.creatures.as_ref() {
