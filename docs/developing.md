@@ -186,7 +186,7 @@ The suite (about 300 tests) covers movement, combat, bosses, races, gadgets, the
 
 ## Tools for development
 
-- **Screenshots without a window:** `ts2-viewer [--level N] --shot out.png "<script>"` renders offscreen and silently. In the script, numbers run that many frames, `+Space` / `-Space` press and release a key, `play` starts Buzz, `cam:x,y,z,yaw,pitch` holds the camera, `tp:x,y,z` puts Buzz somewhere (level units) and `?` prints his position and health.
+- **Screenshots without a window:** `ts2-viewer [--level N] --shot out.png "<script>"` renders offscreen and silently. In the script, numbers run that many frames, `+Space` / `-Space` press and release a key, `play` starts Buzz, `cam:x,y,z,yaw,pitch` holds the camera, `tp:x,y,z` puts Buzz somewhere (level units) and `?` prints his position and health. Video, slow motion, camera paths, input recording and replay, and the live director camera are in [capture.md](capture.md).
 - **Asset audit:** `cargo run --release --bin ts2-tool -- audit-levels "<game dir>"` parses the geometry, textures, models, point lists, spawns and collision of every campaign level.
 - **Diagnostics:** about 50 examples in `examples/` (`cargo run --release --example <name>`), listed in HANDOFF.
 
