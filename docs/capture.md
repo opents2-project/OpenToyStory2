@@ -61,6 +61,11 @@ The script words:
 | `+Fire` / `-Fire` | Presses or lets go of the left mouse button. |
 | `tp:x,y,z[,facing]` | Puts Buzz at a point (level units). |
 | `?` | Prints Buzz's position. |
+| `victory` | Starts the level exit's "To infinity, and beyond!" where Buzz stands: the stance, then the flight. |
+| `films` | Front end only (run with the game folder, no level): opens the film viewer with every film listed. |
+| `only:token` | Draws only the special objects and particles: no level, Buzz, creatures, sky or HUD. Use it with `token:appear` to film the token on its own. |
+| `bg:r,g,b` | Sets the colour the frame is cleared to (0 to 1), e.g. `bg:0,0,0` or `bg:1,1,1`. |
+| `token:appear[:d]` | Puts the level's first uncollected token `d` world units (default 3) in front of the drawn view and starts its appearing sequence as the game does: the pop and wobble, the burst sound and 16 sparkles 32 ticks in, then the spin. |
 
 Camera words. The view they draw replaces the game camera's picture only:
 
@@ -77,6 +82,13 @@ Camera words. The view they draw replaces the game camera's picture only:
 World units: x is east, y is up, and z points the other way from the level's z. One level unit is 1/256 of a world unit. F7 prints both kinds, so you don't need to convert by hand.
 
 ### Examples
+
+A layer with alpha, here the token appearing: render the same shot twice, once on black and once on white. Each pixel's alpha is 1 − (white − black), and its colour is black ÷ alpha. Shots are deterministic, so the two passes line up frame for frame.
+
+```
+ts2-viewer --level 2 --shot t.png "hud:off play ff:30 fix:-56.96,3.5,3.92,0,0.06 only:token bg:0,0,0 2 token:appear:3.2 rec:black 300 rec:off"
+ts2-viewer --level 2 --shot t.png "hud:off play ff:30 fix:-56.96,3.5,3.92,0,0.06 only:token bg:1,1,1 2 token:appear:3.2 rec:white 300 rec:off"
+```
 
 The coordinates here are placeholders; get real ones with F7.
 

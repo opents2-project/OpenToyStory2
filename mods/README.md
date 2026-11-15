@@ -36,6 +36,32 @@ helmet = false     # true: Buzz's glass helmet around the view
 arms = true        # Buzz's first-person arms
 ```
 
+## `[skate]`
+
+Buzz on a skateboard. B (on the ground) gets on and off; off the board he is Buzz as ever. On it: hold a direction to push off (one push at a time, gaining speed while the foot is down) and to steer (the board carves towards it); let go and he rolls on, slowing a little; hold the opposite way to brake, then turn round. Space is an ollie (Buzz's jump; he keeps his speed in the air), E a kickflip (the board turns over once). Riding, Buzz's own moves are off: no double jump, spin, stomp, laser or first person, and he doesn't catch poles, ledges or zip lines. The board is a level model, drawn under his feet, raised so its wheels stand on the floor.
+
+He is drawn from baked clips rather than his own animations: a JSON file in the mod's folder holding, per frame, a matrix for each of Buzz's 23 nodes and where the board's deck sits, all in his model space (+Y down, travelling along -Z before the half turn the viewer draws him with). No such file ships here: clips baked from another game's animations stay on your own machine.
+
+```toml
+[skate]
+animations = "skate.json"          # the baked clips, in this folder
+ride = "RIDE"                      # rolling (loops)
+push = ["PUSH_IN", "PUSH_LOOP"]    # one push off, played in order
+pop = "POP"                        # the ollie's take-off, then
+air = "AIR"                        # its time in the air (holds its last frame)
+flip_pop = "FLIP_POP"             # optional: the kickflip's own pop and air clips
+flip_air = "FLIP_AIR"              # (without them it uses the ollie's)
+board_model = "data/level07/level.ngn"   # a level file (relative to the game folder)
+board_special = 11                 # the special object whose model is the board (level 7's skateboard)
+board_scale = [0.24, 0.12, 0.24]   # its scale: across, height, along
+top_speed = 0x700                  # from pushing (Buzz runs at 0x380), object units a tick
+push_accel = 0x30                  # gained a tick while a push's foot is down
+roll_friction = 3                  # lost a tick rolling
+turn = 0x28                        # most it turns a tick (a full turn is 0x1000); half in the air
+```
+
+The clips file: `{"version": 1, "clips": {"NAME": {"fps": 60, "frames": [{"nodes": [[12 numbers] or null, ...], "board": [x, y, z]}, ...]}}}`. Each node's 12 numbers are a row-vector matrix (three rotation rows, then the translation) from his rest pose, as `scene::creature_batches_matrices` takes them.
+
 ## `[play_as]`
 
 ```toml

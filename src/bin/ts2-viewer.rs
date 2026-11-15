@@ -88,6 +88,205 @@ struct PlayAsState {
     clock: f32,
 }
 
+type NodeMatrices = Vec<Option<[[f32; 4]; 4]>>;
+
+/// Deviation (mod): `[skate]`, loaded: Buzz on a skateboard, drawn from baked clips.
+struct SkateState {
+    spec: ts2::modding::SkateMod,
+    clips: std::collections::HashMap<String, ts2::modding::SkateClip>,
+    /// The board model as a one-node creature, textures renamed into the level's table, and
+    /// the point of it (its deck's top centre) the clips place.
+    board: ngn::Creature,
+    anchor: [f32; 3],
+    /// Ticks in one push off: the push clips' total length.
+    push_ticks: i32,
+    /// A free clock for the rolling loop, and seconds in the air.
+    clock: f32,
+    air: f32,
+    /// The clip playing, the pose it is blending from and for how long.
+    current: String,
+    from: Option<(NodeMatrices, [f32; 3])>,
+    blend: f32,
+    /// This frame's pose and the board's pitch (radians, nose up) and roll (a kickflip).
+    pose: (NodeMatrices, [f32; 3]),
+    pitch: f32,
+    roll: f32,
+    /// Riding (B toggles), and how far he is into getting on (0 off .. 1 on).
+    on: bool,
+    mount: f32,
+    /// How far everything is raised so the wheels stand on the floor (model units).
+    lift: f32,
+    /// The board's half height (model units, before scaling): it turns about its middle.
+    half: f32,
+}
+
+/// Seconds getting on the board blends over, and a kickflip's turn of the board.
+const SKATE_MOUNT: f32 = 0.2;
+const SKATE_FLIP: f32 = 0.38;
+
+/// Seconds a change of skate clip blends over.
+const SKATE_BLEND: f32 = 0.12;
+
+impl SkateState {
+    /// Picks the clip for what the player is doing and samples it.
+    fn update(&mut self, dt: f32, player: &game::Player) {
+        self.clock += dt;
+        self.air = if player.on_floor { 0.0 } else { self.air + dt };
+        self.mount = if self.on { (self.mount + dt / SKATE_MOUNT).min(1.0) } else { 0.0 };
+        let flip = player.skate_trick > 0;
+        let (pop_name, air_name) = match (&self.spec.flip_pop, &self.spec.flip_air) {
+            (Some(p), Some(a)) if flip => (p.clone(), a.clone()),
+            _ => (self.spec.pop.clone(), self.spec.air.clone()),
+        };
+        let pop = &self.clips[&pop_name];
+        let jumping = !player.on_floor && (player.vel[1] < 0 || self.air > 0.1);
+        // The kickflip turns the board over once, from late in the pop, easing in and out.
+        let k = ((self.air - pop.duration() * 0.6) / SKATE_FLIP).clamp(0.0, 1.0);
+        self.roll = if flip && jumping { k * k * (3.0 - 2.0 * k) * std::f32::consts::TAU } else { 0.0 };
+        let (name, t) = if jumping {
+            if self.air < pop.duration() {
+                (pop_name, self.air)
+            } else {
+                let t = self.air - pop.duration();
+                (air_name, t)
+            }
+        } else if player.skate_push > 0 {
+            // Between ticks too, as his position is drawn: the push held 2 or 3 frames a tick judders.
+            let mut t = ((player.skate_push - 1) as f32 + player.tick_fraction()) / game::TICKS;
+            let mut pick = (self.spec.push[0].clone(), 0.0);
+            for name in &self.spec.push {
+                let d = self.clips[name].duration();
+                pick = (name.clone(), t.min(d));
+                if t < d {
+                    break;
+                }
+                t -= d;
+            }
+            pick
+        } else {
+            let ride = &self.clips[&self.spec.ride];
+            (self.spec.ride.clone(), self.clock % ride.duration())
+        };
+        // The board flicks nose up in the pop and levels off.
+        self.pitch = if jumping && self.air < pop.duration() * 2.0 {
+            (self.air / (pop.duration() * 2.0) * std::f32::consts::PI).sin() * 0.35
+        } else {
+            0.0
+        };
+        let now = self.clips[&name].sample(t);
+        if name != self.current {
+            self.from = Some(self.pose.clone());
+            self.blend = 0.0;
+            self.current = name;
+        }
+        self.blend += dt;
+        self.pose = match &self.from {
+            Some((nodes, board)) if self.blend < SKATE_BLEND => {
+                let k = self.blend / SKATE_BLEND;
+                let lerp = |a: f32, b: f32| a + (b - a) * k;
+                let nodes = nodes
+                    .iter()
+                    .zip(&now.0)
+                    .map(|(a, b)| match (a, b) {
+                        (Some(a), Some(b)) => Some(std::array::from_fn(|r| std::array::from_fn(|c| lerp(a[r][c], b[r][c])))),
+                        (_, b) => *b,
+                    })
+                    .collect();
+                (nodes, std::array::from_fn(|c| lerp(board[c], now.1[c])))
+            }
+            _ => now,
+        };
+    }
+
+    /// The board model's matrix in Buzz's model space: scaled, rolled about its length and
+    /// pitched, about its middle, which sits half its height under the clip's deck position.
+    fn board_matrix(&self) -> [[f32; 4]; 4] {
+        let s = self.spec.board_scale;
+        let mul = |a: [[f32; 3]; 3], b: [[f32; 3]; 3]| -> [[f32; 3]; 3] { std::array::from_fn(|i| std::array::from_fn(|j| (0..3).map(|k| a[i][k] * b[k][j]).sum())) };
+        let (rs, rc) = self.roll.sin_cos();
+        let (ps, pc) = self.pitch.sin_cos();
+        // Row vectors, +Y down, front -Z. Roll: about Z. Pitch, nose up: -Z towards -Y.
+        let roll = [[rc, rs, 0.0], [-rs, rc, 0.0], [0.0, 0.0, 1.0]];
+        let pitch = [[1.0, 0.0, 0.0], [0.0, pc, -ps], [0.0, ps, pc]];
+        let rows = mul(mul([[s[0], 0.0, 0.0], [0.0, s[1], 0.0], [0.0, 0.0, s[2]]], roll), pitch);
+        let mid = [self.anchor[0], self.anchor[1] + self.half, self.anchor[2]];
+        let centre = [self.pose.1[0], self.pose.1[1] + self.half * s[1], self.pose.1[2]];
+        let at: [f32; 3] = std::array::from_fn(|c| centre[c] - (0..3).map(|k| mid[k] * rows[k][c]).sum::<f32>());
+        [[rows[0][0], rows[0][1], rows[0][2], 0.0], [rows[1][0], rows[1][1], rows[1][2], 0.0], [rows[2][0], rows[2][1], rows[2][2], 0.0], [at[0], at[1], at[2], 1.0]]
+    }
+}
+
+/// Deviation (mod): loads `[skate]`: its baked clips and the board model.
+fn build_skate(ngn: &mut ngn::Ngn, game: Option<&std::path::Path>) -> Option<SkateState> {
+    let mods = MODS.get()?;
+    let (m, spec) = ts2::modding::active_skate(mods)?;
+    let fail = |e: String| println!("skate: {e}; riding no board");
+    let file = m.dir.join(&spec.animations);
+    let clips = match fs::read_to_string(&file).map_err(|e| e.to_string()).and_then(|t| ts2::modding::load_skate_clips(&t)) {
+        Ok(c) => c,
+        Err(e) => {
+            fail(format!("{}: {e}", file.display()));
+            return None;
+        }
+    };
+    if spec.push.is_empty() {
+        fail("no push clips".into());
+        return None;
+    }
+    if let Some(missing) = [&spec.ride, &spec.pop, &spec.air].into_iter().chain(&spec.push).chain(spec.flip_pop.iter()).chain(spec.flip_air.iter()).find(|n| !clips.contains_key(*n)) {
+        fail(format!("no clip {missing} in {}", file.display()));
+        return None;
+    }
+    let Some(game) = game else {
+        fail("no game folder for the board".into());
+        return None;
+    };
+    let path = game.join(&spec.board_model);
+    let Some(g) = fs::read(&path).ok().and_then(|b| ngn::parse(&b).ok()) else {
+        fail(format!("cannot read {}", path.display()));
+        return None;
+    };
+    let Some(mut mesh) = g.specials.iter().find(|s| s.id == spec.board_special).and_then(|s| {
+        let inst = g.layers.get(s.layer)?.instances.get(s.instance)?;
+        g.layers[s.layer].meshes.get(inst.mesh as usize).cloned()
+    }) else {
+        fail(format!("no special {:#x} in {}", spec.board_special, path.display()));
+        return None;
+    };
+    for name in mesh.textures.iter_mut() {
+        if let Some(t) = g.textures.iter().find(|t| t.name == *name) {
+            let new = format!("mod:sk:{}", t.name);
+            if !ngn.textures.iter().any(|x| x.name == new) {
+                ngn.textures.push(ngn::Texture { name: new.clone(), bmp: t.bmp.clone() });
+            }
+            *name = new;
+        }
+    }
+    let Some(b) = ts2::modding::Bounds::of(mesh.vertices.iter().map(|v| v.pos)) else {
+        fail("the board has no vertices".into());
+        return None;
+    };
+    // The deck's top centre (+Y down: the lowest Y).
+    let anchor = [(b.lo[0] + b.hi[0]) / 2.0, b.lo[1], (b.lo[2] + b.hi[2]) / 2.0];
+    let board = ngn::Creature {
+        id: usize::MAX,
+        name: "SKATEBOARD".into(),
+        nodes: vec![ngn::CreatureNode { name: "board".into(), flags: 1, mesh: Some(mesh), hidden: false }],
+        shared_textures: Vec::new(),
+        shared_materials: Vec::new(),
+        shared_vertices: Vec::new(),
+        patches: Vec::new(),
+        animations: Vec::new(),
+    };
+    let push_ticks = (spec.push.iter().map(|n| clips[n].duration()).sum::<f32>() * game::TICKS).round() as i32;
+    println!("skate: {} clips from mod {}, board special {:#x} from {}, a push {push_ticks} ticks", clips.len(), m.manifest.id, spec.board_special, spec.board_model);
+    let pose = clips[&spec.ride].sample(0.0);
+    // Raised so the wheels (the model's bottom) stand on the floor under the riding pose's deck.
+    let half = (b.hi[1] - b.lo[1]) / 2.0;
+    let lift = (pose.1[1] + 2.0 * half * spec.board_scale[1]).max(0.0) + 1.0;
+    Some(SkateState { spec: spec.clone(), clips, board, anchor, push_ticks, clock: 0.0, air: 0.0, current: spec.ride.clone(), from: None, blend: 0.0, pose, pitch: 0.0, roll: 0.0, on: false, mount: 0.0, lift, half })
+}
+
 /// Deviation (mod): `[play_as.weapon]`, loaded.
 struct WeaponState {
     spec: ts2::modding::Weapon,
@@ -630,6 +829,8 @@ struct Gfx {
     /// The background (0x48FB70): cleared to the sky colour, the ground band over it.
     sky: Vec<GpuBatch>,
     clear: [f64; 3],
+    /// Capture tools (`only:token`): only the special objects and particles are drawn.
+    isolate: bool,
     /// For textures made after loading (movie frames): the layout and sampler, and the movie's
     /// texture, its bind group and size.
     texture_layout: wgpu::BindGroupLayout,
@@ -693,6 +894,8 @@ struct Viewer {
     buzz: Option<buzz::BuzzAnimator>,
     /// Deviation (mod): draw the player as another creature.
     play_as: Option<PlayAsState>,
+    /// Deviation (mod): `[skate]`.
+    skate: Option<SkateState>,
     audio: Option<AudioOut>,
     player_yaw_offset: f32,
     jump_pressed: bool,
@@ -736,6 +939,8 @@ struct Viewer {
     /// First-person look (Q = L1, X = R1).
     look: ts2::look::FirstPerson,
     look_pressed: bool,
+    /// Deviation (mod): B: on or off the skateboard (`[skate]`).
+    board_pressed: bool,
     r1_pressed: bool,
     /// Presses meant for the speech box, kept until a tick reads them; and a jump held over
     /// from it, ignored until Space is let go.
@@ -752,6 +957,9 @@ struct Viewer {
     /// back (0x4A2480). The part number while hidden, -1 once done.
     potato_part: i32,
     token_timer: i32,
+    /// Deviation (owner's request): ticks since the exit's voice line started, while the
+    /// victory (token sequence 3 / 4) runs: drives `exit_pose`.
+    exit_tick: Option<u32>,
     menu_nav: i32,
     hud_frames: u32,
     /// The front end (title, menus, level select), when started without a level.
@@ -817,6 +1025,8 @@ struct Viewer {
     /// A recording being played back (`replay:` in `--shot`): its inputs, the next to apply,
     /// its length in ticks.
     replay: Option<(capture::InputLog, usize, u64)>,
+    /// `only:token` / `token:appear` (capture tools): the one special object still drawn.
+    isolate: Option<i32>,
 }
 
 /// `--record-input <file>`: the inputs from Buzz's first spawn until play stops (F9, pause,
@@ -1379,7 +1589,7 @@ impl Gfx {
         let depth = depth_view(&device, &config);
         let level = upload(&device, level, texture_bgs.len() - 1);
         let level_far = upload(&device, level_far, texture_bgs.len() - 1);
-        Gfx { textures, images, window, surface, target, device, queue, config, pipelines, uniform_bufs, uniform_bgs, texture_bgs, depth, level, level_decal: Vec::new(), level_two_sided: Vec::new(), level_far_two_sided: Vec::new(), level_far, billboards: [Vec::new(), Vec::new()], creature: Vec::new(), specials: [Vec::new(), Vec::new()], hud: Vec::new(), sky: Vec::new(), clear: [0.05, 0.06, 0.1], texture_layout, sampler, movie: None, rooms: u64::MAX }
+        Gfx { textures, images, window, surface, target, device, queue, config, pipelines, uniform_bufs, uniform_bgs, texture_bgs, depth, level, level_decal: Vec::new(), level_two_sided: Vec::new(), level_far_two_sided: Vec::new(), level_far, billboards: [Vec::new(), Vec::new()], creature: Vec::new(), specials: [Vec::new(), Vec::new()], hud: Vec::new(), sky: Vec::new(), clear: [0.05, 0.06, 0.1], isolate: false, texture_layout, sampler, movie: None, rooms: u64::MAX }
     }
 
     fn resize(&mut self, w: u32, h: u32) {
@@ -1568,12 +1778,17 @@ impl Gfx {
         let order = [scene::Blend::Opaque, scene::Blend::Alpha, scene::Blend::Additive, scene::Blend::Darken];
         // Two passes, depth cleared in between, as 0x4CDDD0 does.
         // (uniforms, batches, level geometry: opaque drawn with back faces culled)
-        let passes: [(&[(usize, &[GpuBatch], bool)], bool); 4] = [
+        let passes: [(&[(usize, &[GpuBatch], bool)], bool); 4] = if self.isolate {
+            // Deviation (tools): `only:token` draws just the special objects and particles.
+            [(&[], true), (&[(0, &self.specials[1], false)], false), (&[(1, &self.specials[0], false), (2, &self.creature, false)], false), (&[], false)]
+        } else {
+            [
             (&[(3, &self.sky, false)], true),
             (&[(0, &self.level_far, true), (0, &self.level_far_two_sided, false), (0, &self.billboards[1], false), (0, &self.specials[1], false)], false),
             (&[(1, &self.level, true), (1, &self.level_two_sided, false), (4, &self.level_decal, true), (1, &self.billboards[0], false), (1, &self.specials[0], false), (2, &self.creature, false)], false),
             (&[(3, &self.hud, false)], false),
-        ];
+        ]
+        };
         for (draws, first) in passes {
             let mut pass = enc.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
@@ -1843,7 +2058,9 @@ impl Viewer {
             let move_xz = if talking { [0.0; 2] } else { move_xz };
             let free = !talking && !self.jump_blocked;
             // Deviation (mod): a weapon brings firing and first-person mode back.
-            let no_laser = self.play_as.as_ref().is_some_and(|p| !p.laser && p.weapon.is_none());
+            // Deviation (mod): riding a skateboard: no firing or first-person mode either.
+            let riding = self.skate.as_ref().is_some_and(|s| s.on);
+            let no_laser = riding || self.play_as.as_ref().is_some_and(|p| !p.laser && p.weapon.is_none());
             let no_look = no_laser;
             // Deviation (mod): `[first_person]`.
             let fp_mod = MODS.get().and_then(|m| ts2::modding::active_first_person(m));
@@ -1859,6 +2076,21 @@ impl Viewer {
                 player.touch_reach = pa.touch_reach;
                 pa.clock += dt;
                 pa.air = if player.on_floor { 0.0 } else { pa.air + dt };
+            }
+            // Deviation (mod): on a skateboard. B on the ground gets on or off; off it he is Buzz.
+            let board = std::mem::take(&mut self.board_pressed);
+            if let Some(sk) = self.skate.as_mut() {
+                if board && player.on_floor && player.first_person == 0 {
+                    sk.on = !sk.on;
+                    println!("skate: {}", if sk.on { "on the board" } else { "off the board" });
+                }
+                let s = &sk.spec;
+                player.skate = sk.on.then_some(game::Skate { top: s.top_speed, push_accel: s.push_accel, roll: s.roll_friction, turn: s.turn, push_ticks: sk.push_ticks });
+                if !sk.on {
+                    player.skate_push = 0;
+                    player.skate_trick = 0;
+                }
+                sk.update(dt, player);
             }
             let input = game::Input {
                 move_xz,
@@ -2698,6 +2930,7 @@ impl Viewer {
                 self.token_seq = 1;
             }
             for _ in 0..ticks {
+                self.exit_tick = matches!(self.token_seq, 3 | 4).then(|| self.exit_tick.map_or(0, |t| t + 1));
                 // 0x4A0F80: in the menu and the victory he turns to face the camera (by a
                 // sixteenth a tick); once he's jumped, the camera keeps looking at him.
                 if let Some(look) = self.script.as_mut().and_then(|l| l.look.as_mut()) {
@@ -2783,8 +3016,9 @@ impl Viewer {
                     3 => {
                         // The victory: he turns to the camera, then jumps for joy.
                         self.token_timer -= 1;
-                        if self.token_timer < 0x37A {
-                            // Deviation (owner's request): wings out and away, not the exe's jump.
+                        // Deviation (owner's request): wings out and away (drawn by
+                        // `exit_pose`), not the exe's jump.
+                        if self.exit_tick.unwrap_or(0) >= ts2::exit_pose::LAUNCH {
                             player.fly_off();
                             if let Some(a) = self.audio.as_mut() {
                                 a.play_flat(0x33);
@@ -2977,6 +3211,33 @@ impl Viewer {
                         }
                     }
                     match &self.play_as {
+                        // Deviation (mod): on a skateboard: Buzz and the board from the baked clips,
+                        // raised so the wheels stand on the floor; getting on blends from his pose.
+                        _ if self.skate.as_ref().is_some_and(|s| s.mount > 0.0) => {
+                            let sk = self.skate.as_ref().unwrap();
+                            let mut origin = self.interp.buzz(p.pos).to_array();
+                            origin[1] -= sk.lift;
+                            let k = sk.mount;
+                            let nodes: NodeMatrices = if k < 1.0 {
+                                let buzz_pose = scene::layered_matrices(c.nodes.len(), layer(pose.base), layer(overlay));
+                                let rest = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+                                buzz_pose
+                                    .iter()
+                                    .zip(&sk.pose.0)
+                                    .map(|(a, b)| {
+                                        // Buzz's own pose stands on the floor (+Y down): lowered
+                                        // by the lift the origin was raised by.
+                                        let mut a = a.unwrap_or(rest);
+                                        a[3][1] += sk.lift;
+                                        b.map(|b| std::array::from_fn(|r| std::array::from_fn(|c| a[r][c] + (b[r][c] - a[r][c]) * k)))
+                                    })
+                                    .collect()
+                            } else {
+                                sk.pose.0.clone()
+                            };
+                            scene::merge(&mut batches, scene::creature_batches_matrices(&self.ngn, c, origin, yaw, 1.0, &nodes));
+                            scene::merge(&mut batches, scene::creature_batches_matrices(&self.ngn, &sk.board, origin, yaw, 1.0, &[Some(sk.board_matrix())]));
+                        }
                         // Deviation (mod): the bounce gait, drawn from the creature's own
                         // animations: the hop one stretched over the airtime, else its idle.
                         Some(pa) if pa.mode == ts2::modding::AnimationMode::Hop => {
@@ -3000,7 +3261,8 @@ impl Viewer {
                         }
                         // Deviation (mod): Buzz's pose retargeted onto the substitute creature.
                         Some(pa) => {
-                            let buzz_pose = self.interp.player_pose(scene::layered_matrices(c.nodes.len(), layer(pose.base), layer(overlay)));
+                            let exit = self.exit_tick.and_then(|t| ts2::exit_pose::matrices(&self.anims[ci], c.nodes.len(), t as f32));
+                            let buzz_pose = self.interp.player_pose(exit.unwrap_or_else(|| scene::layered_matrices(c.nodes.len(), layer(pose.base), layer(overlay))));
                             let matrices = pa.retarget.matrices(&buzz_pose);
                             let origin = self.interp.buzz(p.pos).to_array();
                             scene::merge(&mut batches, scene::creature_batches_matrices(&self.ngn, &pa.creature, origin, yaw, pa.scale, &matrices));
@@ -3037,7 +3299,9 @@ impl Viewer {
                             }
                         }
                         None => {
-                            let matrices = self.interp.player_pose(scene::layered_matrices(c.nodes.len(), layer(pose.base), layer(overlay)));
+                            // Deviation (owner's request): the exit's stance and flight.
+                            let exit = self.exit_tick.and_then(|t| ts2::exit_pose::matrices(&self.anims[ci], c.nodes.len(), t as f32));
+                            let matrices = self.interp.player_pose(exit.unwrap_or_else(|| scene::layered_matrices(c.nodes.len(), layer(pose.base), layer(overlay))));
                             scene::merge(&mut batches, scene::creature_batches_matrices(&self.ngn, c, self.interp.buzz(p.pos).to_array(), yaw, 1.0, &matrices));
                         }
                     }
@@ -3124,6 +3388,9 @@ impl Viewer {
             let r = f.cross(Vec3::Y).normalize_or_zero();
             let u = r.cross(f).normalize_or_zero();
             let g = |v: Vec3| Vec3::new(v.x, -v.y, -v.z);
+            if gfx.isolate {
+                batches.clear();
+            }
             scene::merge(
                 &mut batches,
                 self.particles
@@ -3133,6 +3400,7 @@ impl Viewer {
             if let Some(rain) = self
                 .rain
                 .as_ref()
+                .filter(|_| !gfx.isolate)
                 .filter(|r| self.script.as_ref().and_then(|l| l.rain) == Some(r.sprite))
             {
                 scene::merge(
@@ -3142,7 +3410,9 @@ impl Viewer {
             }
         }
         // Laser beams.
-        scene::merge(&mut batches, self.lasers.beams_batches(Vec3::from(world_to_game(self.cam.pos)), self.beam_sprite));
+        if !gfx.isolate {
+            scene::merge(&mut batches, self.lasers.beams_batches(Vec3::from(world_to_game(self.cam.pos)), self.beam_sprite));
+        }
         // Special objects at their current transforms, drawn with their own layer as 0x4CDDD0
         // draws every instance: layer 1 (low detail) before the depth clear, layer 0 after.
         // Their billboards join that layer's.
@@ -3152,6 +3422,9 @@ impl Viewer {
         gfx.rooms = rooms;
         let eye = Vec3::from(world_to_game(self.cam.pos));
         for (&id, s) in &self.specials.objects {
+            if gfx.isolate && self.isolate != Some(id as i32) {
+                continue;
+            }
             if !special_in_view(&self.ngn, s, if self.cull.is_some() { rooms } else { u64::MAX }, eye, self.detail.clamp(0, 2) as usize) {
                 continue;
             }
@@ -3163,6 +3436,7 @@ impl Viewer {
         }
         gfx.specials = [upload(&gfx.device, &special_near, gfx.texture_bgs.len() - 1), upload(&gfx.device, &special_far, gfx.texture_bgs.len() - 1)];
         if self.show_collision
+            && !gfx.isolate
             && let Some(c) = &self.collision_batch
         {
             batches.push(c.clone());
@@ -3393,6 +3667,7 @@ impl Viewer {
             // Circle (stomp). The original's keyboard default is F, which toggles play mode here.
             KeyCode::KeyE if self.player.is_some() => self.stomp_pressed = true,
             KeyCode::KeyQ if self.player.is_some() => self.look_pressed = true,
+            KeyCode::KeyB if self.player.is_some() => self.board_pressed = true,
             // The fire row's key (the mouse button does the same).
             KeyCode::ControlLeft if self.player.is_some() => {
                 self.fire_held = true;
@@ -3923,6 +4198,46 @@ impl Viewer {
                     }
                 }
                 ShotStep::Movie(n) => self.movies.push_back(*n),
+                ShotStep::Victory => {
+                    if let Some(p) = self.player.as_mut() {
+                        p.frozen = true;
+                        p.vel = [0; 3];
+                        self.token_seq = 3;
+                        self.token_timer = 1000;
+                        self.exit_tick = None;
+                        if let Some(a) = self.audio.as_mut() {
+                            a.play_flat(0xA9);
+                        }
+                    }
+                }
+                // Deviation (tools): the isolated token render (docs/capture.md).
+                ShotStep::Isolate => {
+                    if let Some(g) = self.gfx.as_mut() {
+                        g.isolate = true;
+                    }
+                }
+                ShotStep::Background(c) => {
+                    if let Some(g) = self.gfx.as_mut() {
+                        g.clear = *c;
+                    }
+                }
+                ShotStep::TokenAppear(d) => {
+                    let cam = match &self.view {
+                        Some(capture::View::Fixed(p)) => Camera { pos: p.pos, yaw: p.yaw, pitch: p.pitch },
+                        _ => self.cam,
+                    };
+                    let at = world_to_game(cam.pos + cam.forward() * *d).map(|v| v.round() as i32);
+                    if let Some(pk) = self.pickups.as_mut()
+                        && let Some(k) = (0..pk.token_ids.len()).find(|&k| pk.tokens & (1 << k) == 0)
+                    {
+                        let id = pk.token_ids[k] as i32;
+                        pk.move_token(k, at);
+                        self.specials.set_pos(id, at);
+                        pk.reveal_token_animated(k);
+                        self.isolate = Some(id);
+                        println!("token {k} (special {id}) appearing at {at:?}");
+                    }
+                }
                 // Feet as they are stepping out of oil (0x53C60C = 180 ticks of kind 3).
                 ShotStep::Oily => {
                     if let Some(p) = self.player.as_mut() {
@@ -3937,6 +4252,11 @@ impl Viewer {
                 ShotStep::Boss => {
                     if let Some(f) = self.front.as_mut() {
                         f.state.level_done(None);
+                    }
+                }
+                ShotStep::Films => {
+                    if let Some(f) = self.front.as_mut() {
+                        f.state.show_all_movies();
                     }
                 }
                 ShotStep::Results(r) => {
@@ -4106,19 +4426,33 @@ impl Viewer {
             Ok(mut next) => {
                 let attached = self.gfx.is_some();
                 let window = self.gfx.take().and_then(|g| g.window);
+                // The music playing (often asked for in the tick that changes scene) goes with
+                // this scene's audio, so it's started again in the next.
+                let track = front.track;
                 front.scene = scene;
                 next.front = Some(front);
                 // The settings and the demo about to start outlive the scene.
                 let (volumes, lens_flare, active_camera, demo_file) = (self.volumes, self.lens_flare, self.active_camera, self.demo_file.take());
                 let (detail, gamma, animated_textures, controls) = (self.detail, self.gamma, self.animated_textures, self.controls.clone());
+                // So do the movies: a level's intro is asked for in the tick that starts loading it.
+                let (movie, movies, movie_skip) = (self.movie.take(), std::mem::take(&mut self.movies), self.movie_skip);
                 *self = next;
+                (self.movie, self.movies, self.movie_skip) = (movie, movies, movie_skip);
                 (self.volumes, self.lens_flare, self.active_camera, self.demo_file) = (volumes, lens_flare, active_camera, demo_file);
                 (self.detail, self.gamma, self.animated_textures, self.controls) = (detail, gamma, animated_textures, controls);
                 if attached {
                     self.attach(window);
                 }
-                self.apply_volumes();
                 self.enter_front_scene();
+                if let (Some(f), Some(track)) = (self.front.as_mut(), track)
+                    && !matches!(f.state.screen, ts2::frontend::Screen::Play(_) | ts2::frontend::Screen::Demo(_) | ts2::frontend::Screen::Loading(_))
+                {
+                    f.track = Some(track);
+                    if let Some(a) = self.audio.as_mut() {
+                        play_music(a, &f.game, track);
+                    }
+                }
+                self.apply_volumes();
             }
             Err(e) => {
                 eprintln!("{e}");
@@ -4371,6 +4705,8 @@ enum ShotStep {
     Play,
     /// `results:before,now,coins,abilities`: the front end's results screen with these numbers.
     Results(ts2::frontend::LevelResult),
+    /// `films`: the film viewer, every film seen.
+    Films,
     /// `movie:n`: plays movie n.
     Movie(usize),
     /// `boss`: the boss-defeated screen.
@@ -4379,7 +4715,16 @@ enum ShotStep {
     Teleport([f32; 3], Option<i32>),
     /// `?`: prints Buzz's position, health and floor.
     Report,
+    /// `victory`: the level exit's "To infinity, and beyond!" where Buzz stands.
+    Victory,
     Oily,
+    /// `only:token`: draw only the special objects (the `token:appear` one) and particles.
+    Isolate,
+    /// `bg:r,g,b`: the clear colour (0 to 1).
+    Background([f64; 3]),
+    /// `token:appear[:distance]`: the level's first uncollected token, put that many world
+    /// units in front of the drawn view, starts its appearing sequence (0x4A0DB0).
+    TokenAppear(f32),
 }
 
 impl Shot {
@@ -4405,6 +4750,7 @@ impl Shot {
                     "KeyD" => KeyCode::KeyD,
                     "KeyE" => KeyCode::KeyE,
                     "KeyQ" => KeyCode::KeyQ,
+                    "KeyB" => KeyCode::KeyB,
                     _ => return None,
                 })
             };
@@ -4445,14 +4791,24 @@ impl Shot {
                 }
             } else if let Some(n) = w.strip_prefix("movie:").and_then(|n| n.parse().ok()) {
                 shot.script.push(ShotStep::Movie(n));
+            } else if w == "films" {
+                shot.script.push(ShotStep::Films);
             } else if w == "boss" {
                 shot.script.push(ShotStep::Boss);
             } else if w == "play" {
                 shot.script.push(ShotStep::Play);
             } else if w == "?" {
                 shot.script.push(ShotStep::Report);
+            } else if w == "victory" {
+                shot.script.push(ShotStep::Victory);
             } else if w == "oily" {
                 shot.script.push(ShotStep::Oily);
+            } else if w == "only:token" {
+                shot.script.push(ShotStep::Isolate);
+            } else if let Some(v) = w.strip_prefix("bg:").map(|t| t.split(',').filter_map(|x| x.parse().ok()).collect::<Vec<f64>>()).filter(|v| v.len() == 3) {
+                shot.script.push(ShotStep::Background([v[0], v[1], v[2]]));
+            } else if let Some(t) = w.strip_prefix("token:appear") {
+                shot.script.push(ShotStep::TokenAppear(t.strip_prefix(':').and_then(|d| d.parse().ok()).unwrap_or(3.0)));
             } else if let Some(t) = w.strip_prefix("tp:") {
                 let v: Vec<f32> = t.split(',').filter_map(|x| x.parse().ok()).collect();
                 if v.len() >= 3 {
@@ -4717,6 +5073,7 @@ fn load(path: &str, creature: Option<&str>) -> Result<Viewer, String> {
     }
     // Deviation (mod): a play-as creature's textures join the level's table before it is uploaded.
     let play_as = build_play_as(&mut ngn, std::path::Path::new(path).ancestors().nth(3));
+    let skate = build_skate(&mut ngn, std::path::Path::new(path).ancestors().nth(3));
     let anims: Vec<Vec<anim::Animation>> =
         ngn.creatures.iter().map(|c| c.animations.iter().filter_map(|a| anim::parse(a).ok()).collect()).collect();
     let creature_idx = creature
@@ -4926,6 +5283,7 @@ fn load(path: &str, creature: Option<&str>) -> Result<Viewer, String> {
         player: None,
         player_creature,
         play_as,
+        skate,
         start,
         buzz,
         audio,
@@ -4987,6 +5345,7 @@ fn load(path: &str, creature: Option<&str>) -> Result<Viewer, String> {
         rewards: ts2::rewards::Rewards::new(&level_lists),
         look,
         look_pressed: false,
+        board_pressed: false,
         r1_pressed: false,
         talk_jump: false,
         talk_square: false,
@@ -4996,6 +5355,7 @@ fn load(path: &str, creature: Option<&str>) -> Result<Viewer, String> {
         token_choice: 0,
         potato_part: 0,
         token_timer: 0,
+        exit_tick: None,
         menu_nav: 0,
         hud_frames: 0,
         front: None,
@@ -5035,6 +5395,7 @@ fn load(path: &str, creature: Option<&str>) -> Result<Viewer, String> {
         ticks_run: 0,
         recorder: None,
         replay: None,
+        isolate: None,
         level_ended: false,
     };
     // The first-person helmet and arms only show in first person.

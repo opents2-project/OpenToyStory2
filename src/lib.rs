@@ -13,6 +13,7 @@ pub mod controls;
 pub mod creatures;
 pub mod cutscene;
 pub mod dialog;
+pub mod exit_pose;
 pub mod export;
 pub mod flares;
 pub mod fmv;
