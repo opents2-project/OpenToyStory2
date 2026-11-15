@@ -127,3 +127,39 @@ fn sparks_run_along_the_zip_wires() {
             .all(|(r, life)| r.typ == 0x4C && *life == 0x80 && r.vel != [0; 3])
     );
 }
+
+/// Buzz pushes `k`'s box along its first segment for `ticks`; how far it went (level units).
+fn push(l: &mut L2, k: usize, ticks: usize) -> f32 {
+    let b = l.boxes.boxes[k].clone();
+    let lists = leveldat::parse(&fs::read(PathBuf::from(env::var_os("TS2_GAME_DIR").unwrap()).join("data/level05/level.dat")).unwrap()).unwrap();
+    let path = lists.iter().find(|x| x.kind == b.path).unwrap().points.clone();
+    let (p0, p1) = (path[0], path[1]);
+    let d = glam::Vec2::new((p1[0] - p0[0]) as f32, (p1[2] - p0[2]) as f32).normalize();
+    let start = Vec3::new(p0[0] as f32 - d.x * 300.0, p0[1] as f32 - 50.0, p0[2] as f32 - d.y * 300.0);
+    let floor = l.world.floor_below(start.x, start.z, start.y - 200.0).unwrap_or(start.y);
+    let mut p = Player::new(Vec3::new(start.x, floor, start.z));
+    p.on_floor = true;
+    for _ in 0..ticks {
+        l.boxes.tick(&mut p, &l.world, &mut l.specials);
+        l.script.step(&l.world, &mut l.specials, &mut p, &l.boxes);
+        p.tick_pad(&l.world, [d.x, d.y], 0, false, false, false);
+    }
+    let now = l.boxes.boxes[k].pos;
+    ((now[0] - b.pos[0]) as f32).hypot((now[2] - b.pos[2]) as f32) / 32.0
+}
+
+/// The gate holds the crate where it is while it stands; pushed, it tips over to lie flat.
+#[test]
+fn the_gate_falls_when_pushed_and_holds_the_crate_till_then() {
+    let Some(mut l) = load() else { return };
+    let mut p = Player::new(Vec3::new(0.0, -100000.0, 0.0));
+    let standing = l.specials.angles(2);
+    for _ in 0..10 {
+        l.script.step(&l.world, &mut l.specials, &mut p, &l.boxes);
+    }
+    assert_eq!(l.specials.angles(2), standing, "nobody pushed it");
+    assert_eq!(l.boxes.progress(1), 0, "the crate stays put");
+    push(&mut l, 2, 120);
+    let fallen = l.specials.angles(2).unwrap();
+    assert_eq!((fallen[2] - standing.unwrap()[2]) & 0xFFF, 0x400, "a quarter turn");
+}

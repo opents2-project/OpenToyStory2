@@ -35,6 +35,145 @@ pub struct Manifest {
     /// First-person mode changes (Q), `[first_person]`.
     #[serde(default)]
     pub first_person: Option<FirstPersonMod>,
+    /// Buzz on a skateboard, `[skate]`.
+    #[serde(default)]
+    pub skate: Option<SkateMod>,
+}
+
+/// Deviation (mod): `[skate]`: Buzz rides a skateboard. B gets on and off (off it he is Buzz as
+/// ever). Holding a direction pushes off and steers; with none held he rolls on, slowing a
+/// little; back brakes; Space is an ollie, E a kickflip. He is drawn from baked clips (`animations`, per frame one matrix per Buzz node and the board's
+/// position), the board from a level model.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkateMod {
+    /// The baked clips, a JSON file in the mod's folder ([`SkateClips`]).
+    pub animations: String,
+    /// Clip names: rolling, the push (played in order, each once, while pushing), the ollie's
+    /// pop and its time in the air.
+    pub ride: String,
+    pub push: Vec<String>,
+    pub pop: String,
+    pub air: String,
+    /// The kickflip's pop and air clips (E); without them it uses the ollie's. The board
+    /// turns over once about its length whichever.
+    #[serde(default)]
+    pub flip_pop: Option<String>,
+    #[serde(default)]
+    pub flip_air: Option<String>,
+    /// The board: a special object's model in a level file (relative to the game folder).
+    pub board_model: String,
+    pub board_special: u16,
+    /// Scale of the board model, per axis (its X across, Z along).
+    #[serde(default = "board_scale")]
+    pub board_scale: [f32; 3],
+    /// Top speed from pushing (Buzz runs at 0x380 a tick), in object units a tick.
+    #[serde(default = "skate_top")]
+    pub top_speed: i32,
+    /// Speed gained a tick while a push's foot is down, and lost a tick rolling.
+    #[serde(default = "skate_push")]
+    pub push_accel: i32,
+    #[serde(default = "skate_roll")]
+    pub roll_friction: i32,
+    /// Turning, 12-bit angle a tick (a full turn is 0x1000).
+    #[serde(default = "skate_turn")]
+    pub turn: i32,
+}
+
+fn board_scale() -> [f32; 3] {
+    [0.16, 0.12, 0.16]
+}
+fn skate_top() -> i32 {
+    0x700
+}
+fn skate_push() -> i32 {
+    0x30
+}
+fn skate_roll() -> i32 {
+    3
+}
+fn skate_turn() -> i32 {
+    0x28
+}
+
+/// Deviation (mod): baked skate clips: per frame, a row-vector matrix for each of Buzz's nodes
+/// (`None` = not drawn) and where the board's top centre sits, all in Buzz's model space.
+#[derive(Debug, Clone)]
+pub struct SkateClip {
+    pub fps: f32,
+    pub frames: Vec<(Vec<Option<[[f32; 4]; 4]>>, [f32; 3])>,
+}
+
+impl SkateClip {
+    pub fn duration(&self) -> f32 {
+        self.frames.len().saturating_sub(1).max(1) as f32 / self.fps
+    }
+
+    /// The pose at `t` seconds (clamped), matrices lerped element-wise as the game blends.
+    pub fn sample(&self, t: f32) -> (Vec<Option<[[f32; 4]; 4]>>, [f32; 3]) {
+        let last = self.frames.len().saturating_sub(1);
+        let f = (t * self.fps).clamp(0.0, last as f32);
+        let (i, k) = ((f.floor() as usize).min(last), f.fract());
+        let j = (i + 1).min(last);
+        let ((a, ba), (b, bb)) = (&self.frames[i], &self.frames[j]);
+        let nodes = a
+            .iter()
+            .zip(b)
+            .map(|(x, y)| match (x, y) {
+                (Some(x), Some(y)) => Some(std::array::from_fn(|r| std::array::from_fn(|c| x[r][c] + (y[r][c] - x[r][c]) * k))),
+                (x, _) => *x,
+            })
+            .collect();
+        (nodes, std::array::from_fn(|c| ba[c] + (bb[c] - ba[c]) * k))
+    }
+}
+
+#[derive(Deserialize)]
+struct SkateFile {
+    version: u32,
+    clips: std::collections::HashMap<String, SkateFileClip>,
+}
+#[derive(Deserialize)]
+struct SkateFileClip {
+    fps: f32,
+    frames: Vec<SkateFileFrame>,
+}
+#[derive(Deserialize)]
+struct SkateFileFrame {
+    nodes: Vec<Option<[f32; 12]>>,
+    board: [f32; 3],
+}
+
+/// Reads baked skate clips (`[skate] animations`).
+pub fn load_skate_clips(text: &str) -> Result<std::collections::HashMap<String, SkateClip>, String> {
+    let file: SkateFile = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    if file.version != 1 {
+        return Err(format!("skate clips version {} (expected 1)", file.version));
+    }
+    Ok(file
+        .clips
+        .into_iter()
+        .map(|(name, c)| {
+            let frames = c
+                .frames
+                .into_iter()
+                .map(|f| {
+                    let nodes = f
+                        .nodes
+                        .into_iter()
+                        .map(|m| m.map(|m| [[m[0], m[1], m[2], 0.0], [m[3], m[4], m[5], 0.0], [m[6], m[7], m[8], 0.0], [m[9], m[10], m[11], 1.0]]))
+                        .collect();
+                    (nodes, f.board)
+                })
+                .collect();
+            (name, SkateClip { fps: c.fps.max(1.0), frames })
+        })
+        .collect())
+}
+
+/// The `[skate]` in force: the last mod in load order that sets one.
+pub fn active_skate(mods: &[Mod]) -> Option<(&Mod, &SkateMod)> {
+    mods.iter().rev().find_map(|m| m.manifest.skate.as_ref().map(|s| (m, s)))
 }
 
 /// Deviation (mod): `[first_person]`: first person (Q) as a shooter. Every key defaults to
@@ -769,6 +908,50 @@ creature = \"GUNSL\"
         let p = m.play_as.unwrap();
         assert_eq!((p.animation, p.scale, p.idle, p.hop, p.laser, p.hop_height, p.touch_damage), (AnimationMode::Hop, 0.5, Some(0), Some(1), true, 1.0, false));
         assert!(p.model.is_none() && p.map.is_empty());
+    }
+
+    /// Deviation (mod): `[skate]` parses with its defaults, and baked clips sample between
+    /// frames.
+    #[test]
+    fn skate_table_and_clips() {
+        let m = parse_manifest(
+            r#"
+id = "skateboard"
+[skate]
+animations = "skate.json"
+ride = "RIDE"
+push = ["P1", "P2"]
+pop = "POP"
+air = "AIR"
+board_model = "data/level07/level.ngn"
+board_special = 11
+"#,
+        )
+        .unwrap();
+        let s = m.skate.unwrap();
+        assert_eq!((s.push.len(), s.board_special, s.top_speed, s.turn), (2, 11, 0x700, 0x28));
+        assert!(parse_manifest("id = \"x\"
+[skate]
+animations = \"a\"
+wheels = 4
+").is_err());
+        let one = |x: f32| {
+            let mut n = [0.0f32; 12];
+            n[0] = 1.0;
+            n[4] = 1.0;
+            n[8] = 1.0;
+            n[9] = x;
+            format!("{{\"nodes\":[{:?},null],\"board\":[{x},0,0]}}", n)
+        };
+        let text = format!("{{\"version\":1,\"clips\":{{\"RIDE\":{{\"fps\":10,\"frames\":[{},{}]}}}}}}", one(0.0), one(10.0));
+        let clips = load_skate_clips(&text).unwrap();
+        let c = &clips["RIDE"];
+        assert!((c.duration() - 0.1).abs() < 1e-6);
+        let (nodes, board) = c.sample(0.05);
+        assert_eq!(nodes[0].unwrap()[3], [5.0, 0.0, 0.0, 1.0]);
+        assert!(nodes[1].is_none());
+        assert_eq!(board, [5.0, 0.0, 0.0]);
+        assert!(load_skate_clips("{\"version\":2,\"clips\":{}}").is_err());
     }
 
     #[test]

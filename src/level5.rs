@@ -12,9 +12,11 @@
 //! - Hamm (0x14, list 0xF), the hint character (0x22, list 0x14), the finder (0x13, list 0x10:
 //!   five baby ducks, token 1) and a timed challenge (0x12, list 0xE: five bones, token 2).
 //!
+//! - The gate (box 2: mover 0x12, specials 2 / 3) holds the crate (box 1) where it is until
+//!   Buzz pushes the gate; it then falls flat (mover 0x13 takes over), with a crash and dust.
+//!
 //! Not ported: the stomp-started machine and the bubbles it blows (specials 0xC / 0xD and
-//! 0x12 / 0x13 carrying poles 0 / 1), the gate that falls (0x53C6E8; movers 0x12 / 0x13,
-//! specials 2 / 3), underwater fog and sounds.
+//! 0x12 / 0x13 carrying poles 0 / 1), underwater fog and sounds.
 
 use crate::boxes::Boxes;
 use crate::creatures::{Creatures, ParticleRequest};
@@ -60,6 +62,9 @@ pub struct Level5 {
     wires: Vec<[[i32; 3]; 2]>,
     wire: usize,
     spark_in: i32,
+    /// The gate's fall (0x52F8EC: 0 standing, then its angle to 0x400) and speed (0x52F950).
+    gate: i32,
+    gate_speed: i32,
     common: Common,
 }
 
@@ -83,6 +88,8 @@ impl Level5 {
             wires: Vec::new(),
             wire: 0,
             spark_in: 0,
+            gate: 0,
+            gate_speed: 0,
             // 0x41E300: the challenge's five things are hidden until it starts.
             // 0x41E880 calls 0x44ED90(0x100, 0x1000, 0x34) every tick: rain.
             common: Common {
@@ -99,6 +106,48 @@ impl Level5 {
         let texts = [crate::script::HAMM_THANKS, crate::script::HAMM_ASK, crate::script::ALL_TOKENS, CLOWN_TEXT, FINDER_ASK, FINDER_THANKS, CHALLENGE_ASK, CHALLENGE_HURRY, CHALLENGE_DONE];
         self.load_story(exe, lists, &texts, None);
         self.wires = crate::formats::leveldat::segments(lists, crate::formats::leveldat::ZIP_LINES);
+    }
+
+    /// 0x41E880: the gate. Standing, it keeps the crate (box 1, 0x53C6C0) at the start of its
+    /// path; once pushed (box 2's progress, 0x53C6E8) it can't be pushed again, its collision
+    /// changes to the fallen one's and it tips over, gathering speed, to a quarter turn. Landing:
+    /// 20 dust particles (type 0xD, mode 0xE), sounds 0x34 and 0x3A, specials 0x29 / 0x2A gone.
+    fn gate(&mut self, world: &World, specials: &mut Specials, player: &mut Player, boxes: &Boxes) {
+        if self.gate == 0 {
+            if boxes.progress(2) != 0 {
+                self.gate = 1;
+                world.set_mover(0x12, false);
+                world.set_mover(0x13, true);
+                player.vel[0] = 0;
+                player.vel[2] = 0;
+                boxes.release(player);
+            }
+            boxes.reset_progress(1);
+            return;
+        }
+        if boxes.pushing_index() == 3 {
+            boxes.release(player);
+        }
+        if self.gate >= 0x400 {
+            return;
+        }
+        self.gate += self.gate_speed;
+        if self.gate > 0x3FF {
+            self.gate = 0x400;
+            let at = [0x52334, -0xC56, 0x5A016];
+            for k in 0..20u32 {
+                // +0x2A (the frame period) is ((random & 3) + 3) × 2 and the life five times it.
+                let period = (((self.clock.wrapping_mul(31).wrapping_add(k * 7)) & 3) as i32 + 3) * 2;
+                self.spawns.push((at, 0xD, 0xE, 0, Some(period * 5)));
+            }
+            self.sounds.push((0x34, at));
+            self.sounds.push((0x3A, at));
+            specials.set_scale(0x29, [0; 3]);
+            specials.set_scale(0x2A, [0; 3]);
+        }
+        specials.turn_from_own(2, [0, 0, self.gate]);
+        specials.turn_from_own(3, [0, 0, self.gate]);
+        self.gate_speed += 1;
     }
 
     /// 0x41E880: the zip wires are live. Every 0x14 ticks a spark (particle 0x4C, life 0x80,
@@ -249,8 +298,9 @@ impl std::ops::DerefMut for Level5 {
 }
 
 impl Script for Level5 {
-    fn step(&mut self, world: &World, specials: &mut Specials, player: &mut Player, _boxes: &Boxes) {
+    fn step(&mut self, world: &World, specials: &mut Specials, player: &mut Player, boxes: &Boxes) {
         self.clock = self.clock.wrapping_add(1);
+        self.gate(world, specials, player, boxes);
         self.common.rain_splash(world, false, (player.water.0 == 1).then_some(player.water.1));
         // 0x41E880: the river (texture 5).
         let oy = (self.common.clock & 0x3F) as i32;

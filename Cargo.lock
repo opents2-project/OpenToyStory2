@@ -3391,6 +3391,7 @@ dependencies = [
  "pollster",
  "rodio",
  "serde",
+ "serde_json",
  "symphonia",
  "toml 0.8.23",
  "wgpu",

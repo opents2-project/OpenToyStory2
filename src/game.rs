@@ -57,6 +57,22 @@ pub const HOP_VY: i32 = -0x377;
 const MAX_SPEED: i32 = 0x380;
 const MAX_FORWARD: i32 = 0x400;
 const TURN_CAP: i32 = 0x300;
+
+/// Deviation (mod): riding a skateboard (`[skate]`). Speeds in object units a tick, angles
+/// 12-bit.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Skate {
+    /// Top speed from pushing.
+    pub top: i32,
+    /// Speed gained a tick while a push's foot is on the ground.
+    pub push_accel: i32,
+    /// Speed lost a tick rolling.
+    pub roll: i32,
+    /// Most the board turns a tick on the ground (half that in the air).
+    pub turn: i32,
+    /// Ticks in one push off; the foot is down in its middle half.
+    pub push_ticks: i32,
+}
 /// Sharp reversals (≥ 0x5DD, about 132°) snap round instead of turning.
 const SNAP_TURN: i32 = 0x5DD;
 const SKID_TICKS: i32 = 0x1A;
@@ -1176,6 +1192,13 @@ pub struct Player {
     /// stick strafes, the view keeps his facing; jumps, ledges, zip lines, poles, the mantle,
     /// the hook's pull and the boots all work) instead of standing still.
     pub fp_move: bool,
+    /// Deviation (mod): `[skate]`: riding a skateboard ([`Skate`]).
+    pub skate: Option<Skate>,
+    /// Deviation (mod): ticks into the current push off (0 = not pushing).
+    pub skate_push: i32,
+    /// Deviation (mod): ticks since a kickflip (E on the board) started (0 = none); back to 0
+    /// on landing.
+    pub skate_trick: i32,
     /// 0x882920: hover boots ticks left (600, 0x4A4B70), and the height he holds above the
     /// floor (0x882928, 0x2000–0xC000; jump held raises it).
     pub hover: i32,
@@ -1315,6 +1338,9 @@ impl Player {
             hop_vy: HOP_VY,
             touch_reach: 0,
             fp_move: false,
+            skate: None,
+            skate_push: 0,
+            skate_trick: 0,
             hover: 0,
             hover_height: 0x2000,
             grapple: 0,
@@ -1379,7 +1405,8 @@ impl Player {
 
     /// Deviation: the token exit's flight. The original's victory (0x4A0F80 state 3) is an
     /// ordinary jump (0x434090(−0xC00, 5), state 2); at the owner's request Buzz spreads his
-    /// wings (state 8, the double jump's overlay) and climbs steadily until the level ends.
+    /// wings and climbs steadily until the level ends. The state is the double jump's (8);
+    /// the viewer draws the crouch and flight from `exit_pose`.
     /// Called each tick of the exit: the first call starts it (sound 0x10), later ones hold
     /// the climb against gravity.
     pub fn fly_off(&mut self) {
@@ -1901,6 +1928,22 @@ impl Player {
                 jump_held = true;
             }
         }
+        // Deviation (mod): on a skateboard only the board's moves: Space ollies; E kickflips (an
+        // ollie, held to the top, that flips the board); no double jump, spin or stomp.
+        let mut stomp_pressed = stomp_pressed;
+        if self.skate.is_some() && !still {
+            let ground = self.on_floor || self.coyote != 0;
+            if stomp_pressed && ground && self.jump == JumpPhase::None {
+                (jump_pressed, jump_held) = (true, true);
+                self.skate_trick = 1;
+            } else if self.skate_trick > 0 && self.jump == JumpPhase::Holding && self.vel[1] < 0 {
+                jump_held = true;
+            }
+            if !ground && self.jump != JumpPhase::Holding {
+                (jump_pressed, jump_held) = (false, false);
+            }
+            stomp_pressed = false;
+        }
         if locked {
             self.fire_latch = false;
             self.fire_held = false;
@@ -2023,14 +2066,16 @@ impl Player {
         if fpm {
             self.target = self.facing;
         }
-        let mut mode = self.zip_tick(world, jump_pressed, jump_held);
+        // Deviation (mod): on a skateboard he doesn't catch zip lines, ledges or poles.
+        let skating = self.skate.is_some();
+        let mut mode = if skating { 0 } else { self.zip_tick(world, jump_pressed, jump_held) };
         let mut steer = mode == 1;
-        if mode == 0 {
+        if mode == 0 && !skating {
             mode = self.ledge_tick(jump_held);
             steer = mode == 1;
         }
-        let climb = if mode == 0 { self.climb_tick(dpad, stick, jump_pressed) } else { mode };
-        let stomp = if climb == 0 { stomp | self.mantle_tick(world) } else { stomp };
+        let climb = if mode == 0 && !skating { self.climb_tick(dpad, stick, jump_pressed) } else { mode };
+        let stomp = if climb == 0 && !skating { stomp | self.mantle_tick(world) } else { stomp };
         match if climb != 0 { 0 } else { stomp } {
             // On a pole, a ledge or a zip line: no gravity or ground movement this tick. Pulled
             // by the hook, its velocity alone.
@@ -2072,7 +2117,10 @@ impl Player {
                     self.airborne(jump_held);
                 }
                 let mut max = top;
-                if rocket {
+                if let Some(sk) = self.skate.filter(|_| !rocket && !fpm) {
+                    // Deviation (mod): on a skateboard.
+                    self.skate_step(sk, stick, pushing);
+                } else if rocket {
                     // Always thrusting at up to 0x800; the stick only steers (in first person,
                     // a mod's: the view steers).
                     if pushing && !fpm {
@@ -2552,6 +2600,66 @@ impl Player {
     }
 
     /// 0x4343D0: accelerate along the facing and bleed off sideways speed.
+    /// Deviation (mod): a tick on the skateboard. A direction held turns the board towards it
+    /// (carving, at most `turn` a tick) and pushes off, one push at a time, gaining speed while
+    /// the foot is down; one held against the way he rolls brakes. On the ground the board
+    /// grips sideways and rolls on along its facing, slowing a little; in the air he keeps his
+    /// speed and turns half as fast.
+    fn skate_step(&mut self, sk: Skate, stick: [f32; 2], pushing: bool) {
+        let toward_zero = |v: i32, by: i32| if v < 0 { (v + by).min(0) } else { (v - by).max(0) };
+        let ground = self.on_floor || self.coyote != 0;
+        let [vx, _, vz] = self.vel;
+        let (s, c) = (sin12(self.facing), cos12(self.facing));
+        let mut fwd = (vz * c + vx * s) / 4096;
+        let mut side = (vx * c - vz * s) / 4096;
+        let mut brake = false;
+        if pushing {
+            let angle = ((stick[0].atan2(stick[1]) / std::f32::consts::TAU * 4096.0).round() as i32) & 0xFFF;
+            let mut d = (angle - self.facing) & 0xFFF;
+            if d > 0x800 {
+                d -= 0x1000;
+            }
+            if d.abs() > 0x600 && fwd > 0x40 && ground {
+                brake = true;
+            } else {
+                let rate = if ground { sk.turn } else { sk.turn / 2 };
+                self.facing = (self.facing + d.clamp(-rate, rate)) & 0xFFF;
+            }
+        }
+        self.target = self.facing;
+        if !ground {
+            self.skate_push = 0;
+            if self.skate_trick > 0 {
+                self.skate_trick = (self.skate_trick + 1).min(0x7FFF);
+            }
+            return;
+        }
+        if self.skate_trick > 3 {
+            self.skate_trick = 0;
+        }
+        if self.skate_push > 0 {
+            self.skate_push += 1;
+            if self.skate_push > sk.push_ticks {
+                self.skate_push = 0;
+            }
+        }
+        if pushing && !brake && self.skate_push == 0 && fwd < sk.top {
+            self.skate_push = 1;
+        }
+        let p = self.skate_push;
+        if p > sk.push_ticks / 4 && p <= sk.push_ticks * 3 / 4 {
+            fwd = (fwd + sk.push_accel).min(sk.top.max(fwd));
+        }
+        fwd = if brake { (fwd - 0x30).max(0) } else { toward_zero(fwd, sk.roll) };
+        side = toward_zero(side, 0x100);
+        // The board rolls along its (new) facing.
+        let (s, c) = (sin12(self.facing), cos12(self.facing));
+        self.forward = fwd;
+        self.side = side;
+        self.vel[0] = (side * c + fwd * s) / 4096;
+        self.vel[2] = (fwd * c - side * s) / 4096;
+    }
+
     fn accelerate(&mut self, side_decel: i32, friction: i32, max: i32, pushing: bool) {
         // Thrown: nothing slows him and the caps are 0xB80. Rocket boots: 0x800 forward,
         // accelerating 0xA0 a tick.
@@ -3820,6 +3928,128 @@ mod tests {
         assert!(caught, "no mantle");
         assert!((p.pos.y + 800.0).abs() < 20.0 && p.pos.x > 1000.0, "not on the ledge: {:?}", p.pos);
         assert_eq!(p.first_person, 4);
+    }
+
+    fn skater() -> (World, Player) {
+        let w = flat_world();
+        // At one edge of the flat world, facing across it (+Z).
+        let mut p = Player::new(Vec3::new(0.0, 0.0, -19000.0));
+        for _ in 0..5 {
+            p.tick(&w, [0.0; 2], false, false);
+        }
+        p.skate = Some(Skate { top: 0x700, push_accel: 0x30, roll: 3, turn: 0x28, push_ticks: 50 });
+        (w, p)
+    }
+
+    /// Deviation (mod): on a skateboard, holding forward pushes off again and again up to the
+    /// top speed, faster than he runs; let go, he rolls on and slows only a little; held
+    /// back, he brakes, then turns round.
+    #[test]
+    fn skate_pushes_rolls_and_brakes() {
+        let (w, mut p) = skater();
+        assert_eq!(p.facing, 0);
+        for _ in 0..12 {
+            p.tick(&w, [0.0, 1.0], false, false);
+        }
+        assert!(p.skate_push > 0, "pushing off");
+        for _ in 0..200 {
+            p.tick(&w, [0.0, 1.0], false, false);
+        }
+        assert!(p.vel[2] > MAX_FORWARD && p.vel[2] <= 0x700, "top speed {:?}", p.vel);
+        assert!(p.vel[0].abs() < 4, "rolls along its facing {:?}", p.vel);
+        let top = p.vel[2];
+        for _ in 0..60 {
+            p.tick(&w, [0.0; 2], false, false);
+        }
+        assert!(p.vel[2] < top && p.vel[2] > top - 0x200, "rolls on {} -> {}", top, p.vel[2]);
+        assert_eq!(p.skate_push, 0);
+        // Braking takes him down to a crawl without turning him; held on, he turns round.
+        let mut ticks = 0;
+        while p.vel[2] > 0x40 && ticks < 100 {
+            p.tick(&w, [0.0, -1.0], false, false);
+            ticks += 1;
+        }
+        assert!(ticks < 45, "braked in {ticks} ticks");
+        assert_eq!(p.facing, 0, "braking doesn't turn him round");
+        for _ in 0..60 {
+            p.tick(&w, [0.0, -1.0], false, false);
+        }
+        assert_eq!(p.facing, 0x800, "turned round");
+    }
+
+    /// Deviation (mod): the board turns towards the stick at most `turn` a tick, and the
+    /// speed turns with it (no sliding sideways).
+    #[test]
+    fn skate_carves() {
+        let (w, mut p) = skater();
+        for _ in 0..120 {
+            p.tick(&w, [0.0, 1.0], false, false);
+        }
+        let speed = p.vel[2];
+        p.tick(&w, [1.0, 0.0], false, false);
+        assert_eq!(p.facing, 0x28);
+        for _ in 0..30 {
+            p.tick(&w, [1.0, 0.0], false, false);
+        }
+        assert_eq!(p.facing, 0x400, "turned a quarter");
+        assert!(p.vel[0] > speed / 2 && p.vel[2].abs() < 0x40, "the speed turned with him {:?}", p.vel);
+    }
+
+    /// Deviation (mod): on the board E is a kickflip: a full jump (held to the top by itself)
+    /// marked as a trick until he lands; Space in the air does nothing (no double jump) and E
+    /// neither spins nor stomps.
+    #[test]
+    fn skate_kickflip_and_no_double_jump() {
+        let (w, mut p) = skater();
+        let mut held = skater().1;
+        held.tick(&w, [0.0; 2], true, false);
+        let mut flip = skater().1;
+        // E pressed for one tick only.
+        flip.tick_pad(&w, [0.0; 2], 0, false, false, true);
+        assert_eq!(flip.skate_trick, 2);
+        let (mut top_held, mut top_flip) = (0.0f32, 0.0f32);
+        for _ in 0..30 {
+            held.tick(&w, [0.0; 2], true, false);
+            flip.tick_pad(&w, [0.0; 2], 0, false, false, false);
+            top_held = top_held.min(held.pos.y);
+            top_flip = top_flip.min(flip.pos.y);
+        }
+        assert!((top_held - top_flip).abs() < 1.0, "a kickflip goes as high as a held ollie: {top_held} {top_flip}");
+        assert!(flip.skate_trick > 0 && flip.spin == 0 && flip.stomp == 0);
+        // A second press in the air: no double jump.
+        p.tick(&w, [0.0; 2], true, false);
+        for _ in 0..12 {
+            p.tick(&w, [0.0; 2], false, false);
+        }
+        let vy = p.vel[1];
+        p.tick(&w, [0.0; 2], true, false);
+        assert!(p.vel[1] >= vy, "no double jump {} -> {}", vy, p.vel[1]);
+        assert_ne!(p.jump, JumpPhase::Double);
+        for _ in 0..120 {
+            flip.tick_pad(&w, [0.0; 2], 0, false, false, false);
+        }
+        assert!(flip.on_floor && flip.skate_trick == 0, "landed, trick over");
+    }
+
+    /// Deviation (mod): Space is an ollie (Buzz's jump); in the air he keeps his speed.
+    #[test]
+    fn skate_ollie_keeps_speed() {
+        let (w, mut p) = skater();
+        for _ in 0..120 {
+            p.tick(&w, [0.0, 1.0], false, false);
+        }
+        let speed = p.vel[2];
+        p.tick(&w, [0.0; 2], true, false);
+        let mut air = 0;
+        for _ in 0..120 {
+            p.tick(&w, [0.0; 2], true, false);
+            if p.on_floor {
+                break;
+            }
+            air += 1;
+            assert!(p.vel[2] >= speed - 0x10, "speed in the air {:?}", p.vel);
+        }
+        assert!(air > 20 && p.on_floor, "jumped and landed after {air} ticks");
     }
 
     /// Deviation (mod): moving in first person, a jump-off speed far over running pace (a

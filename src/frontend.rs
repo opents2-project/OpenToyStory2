@@ -1204,6 +1204,12 @@ impl FrontEnd {
         }
     }
 
+    /// Capture tools: the film viewer with every film seen.
+    pub fn show_all_movies(&mut self) {
+        self.progress.movies = u32::MAX;
+        self.open_movies(0);
+    }
+
     /// 0x453FA0 / 0x43A600.
     fn open_movies(&mut self, at: u8) {
         self.movies = Some(MovieList::new(&self.tables, self.progress.movies, at));
@@ -1307,18 +1313,22 @@ impl MovieList {
         (self.leaving <= 0).then_some(self.chosen)
     }
 
+    /// Back to front (0x43A600 draws front to back): the curtain, scrolling a fifth as fast
+    /// as the strip; the stills, through the gates; the viewer toy (sprites 0x3C/0x3D, its
+    /// lenses colour-keyed) over them; the arrows and the prompt.
     fn draw(&self, f: &mut Frame, sprites: &[Option<SpriteDef>]) {
         f.picture = Some(0x28);
-        let blink = self.clock & 0x3F < 0x30;
-        let q = &mut f.quads;
-        if self.target > 0 && blink {
-            put(q, sprites, 320.0, 0x10, 0x70, 0x39, 0, [0x80; 3], 0xFF, 0x1000, 0x1000);
-        }
-        if (self.target >> 12) + 1 < self.entries.len() as i32 && blink {
-            put(q, sprites, 320.0, 0x110, 0x70, 0x39, 1, [0x80; 3], 0xFF, 0x1000, 0x1000);
-        }
-        for (x, s, c) in [(0, 0x3C, 0), (0x80, 0x3C, 1), (0x100, 0x3D, 0)] {
-            put(q, sprites, 320.0, x, 0, s, c, [0x80; 3], 0xFF, 0x1000, 0x1000);
+        // The curtain goes under the stills, so it's drawn as panels too.
+        let d = self.x >> 6;
+        for x in [-d % 0x140, -(d % 0x140) + 0x140] {
+            for (off, s, c) in [(0, 0x3E, 0), (0x80, 0x3E, 1), (0x100, 0x3F, 0)] {
+                if let Some(Some(sd)) = sprites.get(s) {
+                    let [u, v] = sd.cells.get(c).copied().unwrap_or([0, 0]);
+                    let (l, w, h) = (x + off, sd.size[0] as f32, sd.size[1] as f32);
+                    let uv = [u as f32 / 256.0, v as f32 / 256.0, (u as f32 + w) / 256.0, (v as f32 + h) / 256.0];
+                    f.panels.push((sd.texture as u32, [l as f32 / 320.0, 0.0, (l as f32 + w) / 320.0, h / 256.0], uv));
+                }
+            }
         }
         // The frames: a blank (sprite 0x40), then this movie's still over it, clipped to the
         // two gates (0x4949B0: x, y, clip from, clip to).
@@ -1340,11 +1350,16 @@ impl MovieList {
             let e = self.entries[self.at(self.x)];
             panels(-(self.x.wrapping_sub(0x800) >> 5 & 0x7F), e.0 as usize, e.1 as usize);
         }
-        let d = self.x >> 6;
-        for x in [-d % 0x140, -(d % 0x140) + 0x140] {
-            for (off, s, c) in [(0, 0x3E, 0), (0x80, 0x3E, 1), (0x100, 0x3F, 0)] {
-                put(&mut f.quads, sprites, 320.0, x + off, 0, s, c, [0x80; 3], 0xFF, 0x1000, 0x1000);
-            }
+        let blink = self.clock & 0x3F < 0x30;
+        let q = &mut f.quads;
+        for (x, s, c) in [(0, 0x3C, 0), (0x80, 0x3C, 1), (0x100, 0x3D, 0)] {
+            put(q, sprites, 320.0, x, 0, s, c, [0x80; 3], 0xFF, 0x1000, 0x1000);
+        }
+        if self.target > 0 && blink {
+            put(q, sprites, 320.0, 0x10, 0x70, 0x39, 0, [0x80; 3], 0xFF, 0x1000, 0x1000);
+        }
+        if (self.target >> 12) + 1 < self.entries.len() as i32 && blink {
+            put(q, sprites, 320.0, 0x110, 0x70, 0x39, 1, [0x80; 3], 0xFF, 0x1000, 0x1000);
         }
         font_text_in(&mut f.glyphs, 320.0, 0xD4, 0xA0, "press jump to select");
     }
@@ -2332,6 +2347,28 @@ mod tests {
         assert!(f.started, "continue game");
         assert_eq!((f.progress.tokens[1], f.progress.tokens[2], f.level), (1, 4, 2));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_film_viewer_plays_the_film_chosen() {
+        let mut f = FrontEnd::new(Tables { movie_order: vec![0, 1, 2], ..tables() });
+        f.progress.movies = 1 << 1 | 1;
+        f.open_movies(0);
+        for _ in 0..200 {
+            f.tick(Pad(0));
+        }
+        f.events.clear();
+        f.tick(Pad(Pad::RIGHT));
+        for _ in 0..200 {
+            f.tick(Pad(0));
+        }
+        f.tick(Pad(Pad::JUMP));
+        for _ in 0..200 {
+            f.tick(Pad(0));
+        }
+        let films: Vec<_> = f.events.iter().filter_map(|e| if let Event::Movie(n) = e { Some(*n) } else { None }).collect();
+        assert_eq!(films, vec![11]);
+        assert_eq!(f.screen, Screen::Movies, "back on the strip after it");
     }
 
     #[test]

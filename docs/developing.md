@@ -165,7 +165,7 @@ A few things are deliberately different, mostly to fix what looked wrong when dr
 - The PS1 background picture is drawn behind windows and the sky (the PC version only used two colours from it).
 - Faces stored pure black in otherwise lit objects take the object's light, and fully transparent-textured glass (the kitchen jars) is drawn as green glass.
 - Level 1's garage drill bits move and hurt, matched to the original by eye.
-- Leaving a level after a Pizza Planet token, Buzz spreads his wings and flies up until the level ends (the PC original does an ordinary jump).
+- Leaving a level after a Pizza Planet token, Buzz spreads his wings and crouches on "To infinity, and", then flies up pumping his fist until the level ends, as the owner's footage of the original shows (this exe's code does an ordinary jump). Both are his own animations (states 0x1B and 0x16); the wings stay open through the flight.
 - A double jump with the rocket boots lit shows the wings (the original keeps the rocket pose).
 - Inside the shield's energy ball Buzz picks up no slime footprints (the original leaves them).
 - Blended level faces that are fully opaque (level 2's tree leaves and bushes) are drawn alpha-tested with depth writes, so a bush's near side always shows over its far side.
