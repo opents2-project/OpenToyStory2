@@ -1178,7 +1178,7 @@ pub struct Player {
     /// 0x53C5E0: rocket boots ticks left (250 from the pickup, 0x4A4D60). He charges forward
     /// on his own at up to 0x800, steering without skids, and jumps at −0x640.
     pub rocket: i32,
-    /// Deviation (mod): the Tin Man's bounce gait (`animation = "hop"`, docs/play-as-mods.md):
+    /// Deviation (mod): the Tin Man's bounce gait (`animation = "hop"`, mods/README.md):
     /// holding a direction on the ground makes a low hop on every landing. Off by default.
     pub hop_gait: bool,
     /// Deviation (mod): the current jump is the gait's low hop, not a pressed jump.

@@ -12,7 +12,7 @@ opents2.ico (16-256 px), opents2.png (256), opents2-1024.png and the installer's
 pictures (wizard-small*.bmp, wizard-large*.bmp). Needs Pillow.
 
 The icon is the one piece of game art the project ships, by the owner's decision
-(PROJECT.md, ground rules).
+(docs/developing.md, ground rules).
 """
 import sys
 from pathlib import Path

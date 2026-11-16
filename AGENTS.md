@@ -1,7 +1,7 @@
 # Agent instructions
 
 ## Scope and precedence
-Applies to every agent working in this repository, regardless of provider. Read PROJECT.md ground rules and the newest HANDOFF.md entries first; preserve the clean-room boundary and user-owned runtime assets. User instructions and platform constraints take precedence. Preserve unrelated changes. Do not commit or push unless requested.
+Applies to every agent working in this repository, regardless of provider. Read docs/developing.md (status, known issues, ground rules) first; preserve the clean-room boundary and user-owned runtime assets. User instructions and platform constraints take precedence. Preserve unrelated changes. Do not commit or push unless requested.
 
 ## Cost-conscious working mode
 - Start with a short scope, milestones, risks and observable completion criteria. Continue authorized work without routine approval stops; ask only for missing decisions or genuine blockers.
@@ -28,6 +28,6 @@ After a failed approach, diagnose and change strategy; do not repeat an unchange
 - Run the smallest meaningful check, then the affected integration checks. The main agent reviews helper diffs and independently verifies consequential results; avoid rerunning expensive identical suites without a reason.
 - Simulation tests do not constitute playtesting. Inspect rendered screenshots before claiming visual correctness. Record actual commands, results, failures and untested behavior; never count skipped game-data tests as coverage.
 - Preserve Level 01's user-approved behavior; use its attic see-saw as a regression reference.
-- HANDOFF.md is the resume record: objective, milestone status, decisions, relevant files, checks, failed approaches and next actions. MODLOG.md records changes. Keep blockers and test coverage in one linked record instead of duplicating multiple status files.
+- docs/developing.md is the one record of the project's state: status, known issues, deviations. Keep it current instead of adding status files; history belongs in git commit messages.
 - Update records at milestones and before stopping. Use automatic context compaction with these records as the recovery point.
 - Final reports state changes, evidence, limitations, outstanding work and where to resume. Do not claim all levels are complete merely because their scripts compile.

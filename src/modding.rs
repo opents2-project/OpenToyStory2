@@ -1,5 +1,5 @@
 //! Mods for the viewer: the `mod.toml` manifest (docs/opents2-design.md section 3) and the
-//! `[play_as]` table (docs/play-as-mods.md), plus the pure maths of "play as another creature":
+//! `[play_as]` table (mods/README.md), plus the pure maths of "play as another creature":
 //! matching the creature's parts to Buzz's and retargeting Buzz's move-table poses onto them.
 //!
 //! Deviation (mod): everything here only runs when a mod asks for it. With no mods the
@@ -657,7 +657,7 @@ fn apply(m: &Matrix, p: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|j| p[0] * m[0][j] + p[1] * m[1][j] + p[2] * m[2][j] + m[3][j])
 }
 
-/// Retargets Buzz's per-node matrices onto another creature's nodes (docs/play-as-mods.md).
+/// Retargets Buzz's per-node matrices onto another creature's nodes (mods/README.md).
 #[derive(Debug, Clone)]
 pub struct Retarget {
     /// For each of the other creature's nodes, the Buzz node it follows.

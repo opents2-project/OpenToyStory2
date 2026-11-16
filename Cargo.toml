@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 description = "Clean-room Rust reimplementation of Toy Story 2 (PC, 1999) that loads assets from a user's own install"
 publish = false
+license = "MIT"
+repository = "https://github.com/opents2-project/OpenToyStory2"
 build = "build.rs"
 
 # OpenToyStory2: the engine stays this root crate for now; the launcher (and later the editor

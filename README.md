@@ -6,7 +6,7 @@
 
 OpenToyStory2 is a free, fan-made remake of the engine behind the 1999 PC game *Toy Story 2: Buzz Lightyear to the Rescue*. It plays the game you already own, the same levels, characters, music and movies, on a modern Windows PC, and adds things the original never had, like mods.
 
-It doesn't include the game itself, original files can be found here (abandonware): https://www.myabandonware.com/game/disney-pixar-toy-story-2-buzz-lightyear-to-the-rescue-bfq
+It doesn't include the game itself. If you don't have it, the original is listed as abandonware [here](https://www.myabandonware.com/game/disney-pixar-toy-story-2-buzz-lightyear-to-the-rescue-bfq).
 
 **Beta:** All 15 levels can be played from start to finish, but levels 2 to 15 are still being tested and polished. Expect the odd bug.
 
@@ -18,7 +18,7 @@ It doesn't include the game itself, original files can be found here (abandonwar
 - **A friendly launcher.** It finds your installed game for you, sets up the music and movies from your disc or disc image, and lets you jump straight into any level.
 - **Mods.** Play as Woody with a revolver, as one of Zurg's bouncing robots or as the giant Tin Man boss, or turn first person into a full shooter. You turn mods on and off with a tick box.
 
-![The OpenToyStory2 launcher](assets/readme/ui.JPG)
+![The OpenToyStory2 launcher](assets/readme/ui.jpg)
 
 ## Getting started
 
@@ -30,7 +30,7 @@ You'll need:
 
 Then:
 
-1. Download the latest `OpenToyStory2-setup.exe` from the [Releases page](https://github.com/opents2-project/OpenToyStory2/releases) and run it. It installs just for you and doesn't need administrator rights.
+1. Download the latest installer (`OpenToyStory2-<version>-setup.exe`) from the [Releases page](https://github.com/opents2-project/OpenToyStory2/releases) and run it. It installs just for you and doesn't need administrator rights.
 2. Open **OpenToyStory2** from the Start menu.
 3. The launcher looks for your game. If it can't find it, open **Game Files** and point it at the folder that has `toy2.exe` in it. To get music and movies, also choose your disc or disc image under **Disc folder**.
 4. Press **Play**.
@@ -71,13 +71,13 @@ Want to make your own? Mods are small text files that point at the game's own ch
 ## Questions
 
 **Do I need the original game?**
-Yes. OpenToyStory2 contains none of the game's levels, characters, sounds, music or movies. They're all loaded from your copy when you play. Cannot host the game for legal reasons.
+Yes. OpenToyStory2 contains none of the game's levels, characters, sounds, music or movies. They're all loaded from your copy when you play, and we can't host the game for legal reasons.
 
 **Is this official?**
 No. It's an unofficial project made by fans, and it isn't affiliated with or endorsed by Disney, Pixar, Traveller's Tales or Activision.
 
 **How was it made?**
-The original game's workings were reverse engineered and then written again from scratch in the Rust programming language. None of the original program code is used. Claude Opus 5.5 used extensively. 
+The original game's workings were reverse engineered and then written again from scratch in the Rust programming language. None of the original program code is used. It was written with extensive help from Claude Opus 5.5.
 
 **Does it work on Mac or Linux?**
 Not yet. Windows only for now.
@@ -91,6 +91,10 @@ OpenToyStory2 is made by **lewiloon2k/asmerdon** and contributors, and inspired 
 
 *Toy Story 2: Buzz Lightyear to the Rescue* was developed by Traveller's Tales and published by Activision. Toy Story and its characters are the property of Disney and Pixar.
 
+## Licence
+
+OpenToyStory2's own code is released under the [MIT licence](LICENSE). The licence covers this project's code only, not *Toy Story 2* or any of its files.
+
 ## For developers
 
-Want to build it yourself, run the tests or see how things work inside? Start with [docs/developing.md](docs/developing.md). It covers running from source, building the installer, the detailed status and the differences from the original. The ground rules and architecture are in [PROJECT.md](PROJECT.md), and the day-to-day working notes are in [HANDOFF.md](HANDOFF.md).
+Want to build it yourself, run the tests or see how things work inside? Start with [docs/developing.md](docs/developing.md). It covers the detailed status and known issues, running from source, building the installer, the code layout, the tests and tools, and the differences from the original.

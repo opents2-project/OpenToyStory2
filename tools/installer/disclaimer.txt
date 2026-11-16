@@ -30,7 +30,8 @@ OpenToyStory2's own source code: https://github.com/opents2-project/OpenToyStory
 The software is provided "as is", without warranty of any kind. In no event shall
 the authors be liable for any claim, damages or other liability arising from its use.
 
-[Licence for OpenToyStory2's own code: to be chosen by the project owner.]
+OpenToyStory2's own code is released under the MIT licence (the LICENSE file in the
+repository). The licence covers the project's code only, not the original game.
 
 OpenToyStory2 is built with open-source libraries including wgpu, winit, egui, rodio,
 Symphonia and oxideav, each under its own licence.
