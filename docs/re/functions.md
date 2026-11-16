@@ -2,7 +2,7 @@
 
 Addresses are virtual addresses in the original exe (image base 0x400000). Names are ours.
 Confidence: **✔** confirmed by behaviour or data round-trip, **~** strong inference, **?** guess.
-Decompiler output lives in git-ignored `re/out/` (see PROJECT.md). Never commit it.
+Decompiler output lives in git-ignored `re/out/` (see docs/developing.md). Never commit it.
 
 ## Game loop
 | Address | Name | Notes |

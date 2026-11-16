@@ -55,7 +55,7 @@ static SILENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::ne
 /// Deviation (mod): the mods named by `OPENTS2_MODS` and `--mod`, loaded once at start-up.
 static MODS: std::sync::OnceLock<Vec<ts2::modding::Mod>> = std::sync::OnceLock::new();
 
-/// Deviation (mod): the player drawn as another creature (`[play_as]`, docs/play-as-mods.md).
+/// Deviation (mod): the player drawn as another creature (`[play_as]`, mods/README.md).
 /// Buzz's controller, collision and camera are unchanged; only the drawn model differs.
 struct PlayAsState {
     /// The substitute, with its textures renamed into the level's texture table.
