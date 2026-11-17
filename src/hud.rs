@@ -84,7 +84,7 @@ pub struct Quad {
 pub fn sprite_table(exe: &Exe, level: usize) -> Vec<Option<SpriteDef>> {
     let read = |p: u32| -> Option<SpriteDef> {
         let d = exe.at(p, 8).ok()?;
-        let cells = (0..40).map_while(|k| exe.at(p + 8 + 2 * k, 2).ok().map(|c| [c[0], c[1]])).collect();
+        let cells = (0..64).map_while(|k| exe.at(p + 8 + 2 * k, 2).ok().map(|c| [c[0], c[1]])).collect();
         Some(SpriteDef { texture: i16::from_le_bytes([d[0], d[1]]), size: [d[2], d[3]], cells })
     };
     let ptr = |va: u32| exe.at(va, 4).ok().map(|b| u32::from_le_bytes(b.try_into().unwrap()));

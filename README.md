@@ -51,7 +51,7 @@ Your settings and mods are kept in `%APPDATA%\OpenToyStory2` and your saves in `
 | Escape | Pause menu; back in menus |
 | M | Music on or off |
 | V | Switch between the original camera and a free camera |
-| F11 or Alt+Enter | Fullscreen on or off (start fullscreen with `--fullscreen`) |
+| F11 or Alt+Enter | Fullscreen on or off; the resolution and display mode are also under Options, Configure GFX |
 
 ## Mods
 

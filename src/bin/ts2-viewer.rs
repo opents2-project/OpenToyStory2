@@ -546,6 +546,96 @@ const BINDABLE: &[KeyCode] = &[
     KeyCode::Insert, KeyCode::Home, KeyCode::End, KeyCode::PageUp, KeyCode::PageDown, KeyCode::Comma, KeyCode::Period, KeyCode::Slash, KeyCode::Semicolon, KeyCode::Quote, KeyCode::BracketLeft, KeyCode::BracketRight,
 ];
 
+/// Deviation (owner's request): windowed or fullscreen and the size, from the graphics page
+/// or F11 / Alt+Enter, kept in `display.txt` beside the saves. `resolution` [0, 0] is the
+/// monitor's own size (borderless fullscreen); `windowed` is the window's size to go back to.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Display {
+    fullscreen: bool,
+    resolution: [u32; 2],
+    windowed: [u32; 2],
+}
+
+static DISPLAY: std::sync::Mutex<Display> = std::sync::Mutex::new(Display { fullscreen: false, resolution: [1280, 720], windowed: [1280, 720] });
+
+fn display() -> Display {
+    *DISPLAY.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn display_path() -> std::path::PathBuf {
+    ts2::save::dir().join("display.txt")
+}
+
+fn load_display() {
+    let Ok(text) = fs::read_to_string(display_path()) else { return };
+    let size = |v: &str| -> Option<[u32; 2]> {
+        let (w, h) = v.split_once('x')?;
+        Some([w.trim().parse().ok()?, h.trim().parse().ok()?])
+    };
+    let mut d = display();
+    for line in text.lines() {
+        match line.split_once('=') {
+            Some(("fullscreen", v)) => d.fullscreen = v.trim() == "1",
+            Some(("resolution", v)) => d.resolution = if v.trim() == "native" { [0, 0] } else { size(v).unwrap_or(d.resolution) },
+            Some(("windowed", v)) => d.windowed = size(v).unwrap_or(d.windowed),
+            _ => {}
+        }
+    }
+    *DISPLAY.lock().unwrap_or_else(|e| e.into_inner()) = d;
+}
+
+fn save_display(d: Display) {
+    *DISPLAY.lock().unwrap_or_else(|e| e.into_inner()) = d;
+    let res = if d.resolution == [0, 0] { "native".to_string() } else { format!("{}x{}", d.resolution[0], d.resolution[1]) };
+    let text = format!("fullscreen={}\nresolution={res}\nwindowed={}x{}\n", d.fullscreen as u8, d.windowed[0], d.windowed[1]);
+    if let Some(dir) = display_path().parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    if let Err(e) = fs::write(display_path(), text) {
+        eprintln!("display settings not saved: {e}");
+    }
+}
+
+/// Common window sizes, offered when windowed up to the monitor's size (8K included).
+const WINDOW_SIZES: [[u32; 2]; 14] = [
+    [800, 600], [1024, 768], [1280, 720], [1280, 1024], [1366, 768], [1600, 900], [1920, 1080], [1920, 1200],
+    [2560, 1080], [2560, 1440], [3440, 1440], [3840, 2160], [5120, 2880], [7680, 4320],
+];
+
+/// The graphics page's sizes for this window's monitor: windowed, then fullscreen (the
+/// monitor's own modes, then [0, 0] for its own size, borderless).
+fn display_sizes(w: &Window) -> [Vec<[u32; 2]>; 2] {
+    let Some(m) = w.current_monitor() else { return [WINDOW_SIZES.to_vec(), vec![[0, 0]]] };
+    let native = [m.size().width, m.size().height];
+    let mut windowed: Vec<[u32; 2]> = WINDOW_SIZES.iter().copied().filter(|s| s[0] <= native[0] && s[1] <= native[1]).collect();
+    if windowed.is_empty() {
+        windowed.push(native);
+    }
+    let mut full: Vec<[u32; 2]> = m.video_modes().map(|v| [v.size().width, v.size().height]).filter(|s| s[0] >= 640 && *s != native).collect();
+    full.sort_by_key(|s| (s[0] as u64 * s[1] as u64, s[0]));
+    full.dedup();
+    full.push([0, 0]);
+    [windowed, full]
+}
+
+/// Puts the window in the mode `d` asks for: windowed at its size, borderless fullscreen at
+/// the monitor's own size, or exclusive fullscreen at another of the monitor's modes.
+fn apply_display(w: &Window, d: Display) {
+    if d.fullscreen {
+        let monitor = w.current_monitor();
+        let mode = monitor.as_ref().filter(|_| d.resolution != [0, 0]).and_then(|m| {
+            m.video_modes().filter(|v| [v.size().width, v.size().height] == d.resolution).max_by_key(|v| (v.refresh_rate_millihertz(), v.bit_depth()))
+        });
+        w.set_fullscreen(Some(match mode {
+            Some(v) => winit::window::Fullscreen::Exclusive(v),
+            None => winit::window::Fullscreen::Borderless(monitor),
+        }));
+    } else {
+        w.set_fullscreen(None);
+        let _ = w.request_inner_size(winit::dpi::PhysicalSize::new(d.windowed[0].max(320), d.windowed[1].max(200)));
+    }
+}
+
 fn controls_path() -> std::path::PathBuf {
     ts2::save::dir().join("controls.txt")
 }
@@ -1396,8 +1486,9 @@ impl Gfx {
             force_fallback_adapter: false,
         }))
         .expect("no suitable GPU adapter");
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default(), None)).expect("request device");
+        // The adapter's own limits rather than wgpu's defaults, so the surface can be as large as
+        // the GPU allows (16384 on most: 8K and beyond).
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor { required_limits: adapter.limits(), ..Default::default() }, None)).expect("request device");
 
         let (config, target) = match (&surface, &window) {
             (Some(surface), Some(window)) => {
@@ -1593,8 +1684,9 @@ impl Gfx {
     }
 
     fn resize(&mut self, w: u32, h: u32) {
-        self.config.width = w.max(1);
-        self.config.height = h.max(1);
+        let max = self.device.limits().max_texture_dimension_2d;
+        self.config.width = w.clamp(1, max);
+        self.config.height = h.clamp(1, max);
         if let Some(s) = &self.surface {
             s.configure(&self.device, &self.config);
         }
@@ -1677,19 +1769,49 @@ impl Gfx {
         );
     }
 
+    /// The next picture to draw into, after matching the surface to the window: going in or
+    /// out of fullscreen can leave a stale or "suboptimal" swap chain, which some drivers
+    /// present as black until it is made again. `Err` skips this frame (the next one is
+    /// fine); `Ok(None)` is the offscreen target.
+    fn acquire(&mut self) -> Result<Option<wgpu::SurfaceTexture>, ()> {
+        if self.surface.is_none() {
+            return Ok(None);
+        }
+        if let Some(size) = self.window.as_ref().map(|w| w.inner_size()) {
+            if size.width == 0 || size.height == 0 {
+                return Err(()); // minimised
+            }
+            let max = self.device.limits().max_texture_dimension_2d;
+            if [size.width.min(max), size.height.min(max)] != [self.config.width, self.config.height] {
+                self.resize(size.width, size.height);
+            }
+        }
+        let Some(surface) = &self.surface else { return Ok(None) };
+        match surface.get_current_texture() {
+            Ok(f) if f.suboptimal => {
+                drop(f);
+                surface.configure(&self.device, &self.config);
+                Err(())
+            }
+            Ok(f) => Ok(Some(f)),
+            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                surface.configure(&self.device, &self.config);
+                Err(())
+            }
+            Err(e) => {
+                eprintln!("surface error: {e}");
+                Err(())
+            }
+        }
+    }
+
     /// Draws the movie frame alone, as large as fits, on black.
     fn render_movie(&mut self) {
+        if self.movie.is_none() {
+            return;
+        }
+        let Ok(frame) = self.acquire() else { return };
         let Some((_, bg, [w, h])) = &self.movie else { return };
-        let frame = match &self.surface {
-            Some(surface) => match surface.get_current_texture() {
-                Ok(f) => Some(f),
-                Err(_) => {
-                    surface.configure(&self.device, &self.config);
-                    return;
-                }
-            },
-            None => None,
-        };
         let view = match (&frame, &self.target) {
             (Some(f), _) => f.texture.create_view(&Default::default()),
             (None, Some(t)) => t.create_view(&Default::default()),
@@ -1739,20 +1861,7 @@ impl Gfx {
     }
 
     fn render(&mut self, uniforms: &Uniforms) {
-        let frame = match &self.surface {
-            Some(surface) => match surface.get_current_texture() {
-                Ok(f) => Some(f),
-                Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                    surface.configure(&self.device, &self.config);
-                    return;
-                }
-                Err(e) => {
-                    eprintln!("surface error: {e}");
-                    return;
-                }
-            },
-            None => None,
-        };
+        let Ok(frame) = self.acquire() else { return };
         // Far set beyond FAR_FROM, detailed set within NEAR_TO, everything else unclipped.
         let s = uniforms.params[2];
         let ranges = [[0.0, f32::MAX], [0.0, uniforms.range[1] * s], [0.0, f32::MAX]];
@@ -3740,7 +3849,8 @@ impl ApplicationHandler for Viewer {
             return;
         }
         #[allow(unused_mut)]
-        let mut attrs = Window::default_attributes().with_title("OpenToyStory2").with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
+        let d = display();
+        let mut attrs = Window::default_attributes().with_title("OpenToyStory2").with_inner_size(winit::dpi::PhysicalSize::new(d.windowed[0].max(320), d.windowed[1].max(200)));
         // The Pizza Planet token embedded by build.rs (resource 1).
         #[cfg(windows)]
         {
@@ -3751,6 +3861,9 @@ impl ApplicationHandler for Viewer {
             attrs = attrs.with_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
         }
         let window = Arc::new(el.create_window(attrs).expect("create window"));
+        if d.fullscreen && !START_FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed) {
+            apply_display(&window, d);
+        }
         self.attach(Some(window));
     }
 
@@ -3815,12 +3928,23 @@ impl Viewer {
         true
     }
 
-    fn toggle_fullscreen(&self) {
+    /// F11 / Alt+Enter: borderless fullscreen at the monitor's size, or back to the window.
+    fn toggle_fullscreen(&mut self) {
+        let mut d = display();
+        d.fullscreen = !d.fullscreen;
+        d.resolution = if d.fullscreen { [0, 0] } else { d.windowed };
+        self.set_display(d);
+    }
+
+    /// Applies and saves display settings, and shows them on the graphics page.
+    fn set_display(&mut self, d: Display) {
+        save_display(d);
+        if let Some(f) = self.front.as_mut() {
+            f.state.options.fullscreen = d.fullscreen;
+            f.state.options.resolution = d.resolution;
+        }
         if let Some(w) = self.gfx.as_ref().and_then(|g| g.window.as_ref()) {
-            w.set_fullscreen(match w.fullscreen() {
-                Some(_) => None,
-                None => Some(winit::window::Fullscreen::Borderless(w.current_monitor())),
-            });
+            apply_display(w, d);
         }
     }
 
@@ -3962,6 +4086,11 @@ impl Viewer {
         } else if let Some((lo, hi)) = scene::bounds(&level) {
             let c = [0, 1, 2].map(|k| (lo[k] + hi[k]) / 2.0);
             self.cam.pos = Vec3::new(c[0], -c[1], -c[2]) * WORLD_SCALE + Vec3::new(0.0, 2.0, 0.0);
+        }
+        if let (Some(f), Some(w)) = (self.front.as_mut(), window.as_ref()) {
+            f.state.display_sizes = display_sizes(w);
+            let d = display();
+            (f.state.options.fullscreen, f.state.options.resolution) = (d.fullscreen, d.resolution);
         }
         self.gfx = Some(Gfx::new(window, &self.ngn, &level, &level_far, self.backdrop_image.as_ref()));
         if let Some(g) = self.gfx.as_mut() {
@@ -4254,6 +4383,11 @@ impl Viewer {
                         f.state.level_done(None);
                     }
                 }
+                ShotStep::GraphicsPage => {
+                    if let Some(f) = self.front.as_mut() {
+                        f.state.show_graphics_page();
+                    }
+                }
                 ShotStep::Films => {
                     if let Some(f) = self.front.as_mut() {
                         f.state.show_all_movies();
@@ -4483,7 +4617,7 @@ impl Viewer {
             f.acc -= 1.0 / 60.0;
             f.state.tick(pad);
         }
-        let (mut pending_volumes, mut pending_demo) = (None, None);
+        let (mut pending_volumes, mut pending_demo, mut pending_display) = (None, None, None);
         for ev in std::mem::take(&mut f.state.events) {
             match ev {
                 Event::Sound(id) => {
@@ -4505,6 +4639,15 @@ impl Viewer {
                 Event::Volumes { music, sfx } => pending_volumes = Some((music, sfx)),
                 Event::LensFlare(on) => self.lens_flare = on,
                 Event::Graphics { detail, gamma, animated_textures } => (self.detail, self.gamma, self.animated_textures) = (detail, gamma, animated_textures),
+                Event::Display { fullscreen, resolution } => {
+                    let mut d = display();
+                    d.fullscreen = fullscreen;
+                    d.resolution = resolution;
+                    if !fullscreen && resolution != [0, 0] {
+                        d.windowed = resolution;
+                    }
+                    pending_display = Some(d);
+                }
                 Event::ControlsReset => self.controls = load_controls(),
                 Event::ControlsSave => save_controls(&self.controls),
                 Event::ControlsDefault => self.controls.reset(),
@@ -4519,6 +4662,9 @@ impl Viewer {
         if let Some(v) = pending_volumes {
             self.volumes = v;
             self.apply_volumes();
+        }
+        if let Some(d) = pending_display {
+            self.set_display(d);
         }
         let Some(f) = self.front.as_mut() else { return };
         let want = (f.state.screen.scene(&f.state.tables), f.state.screen.variant());
@@ -4707,6 +4853,8 @@ enum ShotStep {
     Results(ts2::frontend::LevelResult),
     /// `films`: the film viewer, every film seen.
     Films,
+    /// `gfx`: the options' graphics page.
+    GraphicsPage,
     /// `movie:n`: plays movie n.
     Movie(usize),
     /// `boss`: the boss-defeated screen.
@@ -4791,6 +4939,8 @@ impl Shot {
                 }
             } else if let Some(n) = w.strip_prefix("movie:").and_then(|n| n.parse().ok()) {
                 shot.script.push(ShotStep::Movie(n));
+            } else if w == "gfx" {
+                shot.script.push(ShotStep::GraphicsPage);
             } else if w == "films" {
                 shot.script.push(ShotStep::Films);
             } else if w == "boss" {
@@ -4934,6 +5084,7 @@ fn main() {
             }
         }
     }
+    load_display();
     if let Some(i) = args.iter().position(|a| a == "--fullscreen") {
         args.remove(i);
         START_FULLSCREEN.store(true, std::sync::atomic::Ordering::Relaxed);

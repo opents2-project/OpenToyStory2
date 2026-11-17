@@ -6,6 +6,6 @@ fn main() {
     let from = a.get(3).and_then(|s| usize::from_str_radix(s, 16).ok()).unwrap_or(0);
     let to = a.get(4).and_then(|s| usize::from_str_radix(s, 16).ok()).unwrap_or(0x80);
     for (k, s) in t.iter().enumerate().take(to).skip(from) {
-        println!("{k:#04x} {:?}", s.as_ref().map(|s| (s.texture, s.size, &s.cells[..s.cells.len().min(4)])));
+        println!("{k:#04x} {:?}", s.as_ref().map(|s| (s.texture, s.size, &s.cells[..])));
     }
 }
