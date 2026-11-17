@@ -6,7 +6,7 @@
 
 OpenToyStory2 is a free, fan-made remake of the engine behind the 1999 PC game *Toy Story 2: Buzz Lightyear to the Rescue*. It plays the game you already own, the same levels, characters, music and movies, on a modern Windows PC, and adds things the original never had, like mods.
 
-It doesn't include the game itself. If you don't have it, the original is listed as abandonware [here](https://www.myabandonware.com/game/disney-pixar-toy-story-2-buzz-lightyear-to-the-rescue-bfq).
+**It doesn't include the game itself.** If you don't have it, the original is listed as abandonware [here](https://www.myabandonware.com/game/disney-pixar-toy-story-2-buzz-lightyear-to-the-rescue-bfq).
 
 **Beta:** All 15 levels can be played from start to finish, but levels 2 to 15 are still being tested and polished. Expect the odd bug.
 
