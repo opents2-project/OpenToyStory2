@@ -62,6 +62,7 @@ The script words:
 | `tp:x,y,z[,facing]` | Puts Buzz at a point (level units). |
 | `?` | Prints Buzz's position. |
 | `victory` | Starts the level exit's "To infinity, and beyond!" where Buzz stands: the stance, then the flight. |
+| `gfx` | Front end only: opens the options' graphics page. |
 | `films` | Front end only (run with the game folder, no level): opens the film viewer with every film listed. |
 | `only:token` | Draws only the special objects and particles: no level, Buzz, creatures, sky or HUD. Use it with `token:appear` to film the token on its own. |
 | `bg:r,g,b` | Sets the colour the frame is cleared to (0 to 1), e.g. `bg:0,0,0` or `bg:1,1,1`. |

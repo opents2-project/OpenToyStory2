@@ -254,6 +254,9 @@ pub enum Event {
     ControlsReset,
     ControlsSave,
     ControlsDefault,
+    /// Deviation (owner's request): the graphics page's display rows. `resolution` [0, 0] is
+    /// the monitor's own size.
+    Display { fullscreen: bool, resolution: [u32; 2] },
 }
 
 /// A character of 0x49D390's font: texture 31, a 32-pixel cell.
@@ -335,6 +338,9 @@ pub struct FrontEnd {
     pub options: Options,
     /// The keys on the controller page, row by row (set by the viewer).
     pub key_names: Vec<String>,
+    /// The sizes the graphics page offers, windowed and fullscreen (set by the viewer from
+    /// the monitor; [0, 0] in the fullscreen list is the monitor's own size).
+    pub display_sizes: [Vec<[u32; 2]>; 2],
     option_screen: OptionScreen,
     movies: Option<MovieList>,
     credits: Option<Credits>,
@@ -377,6 +383,7 @@ impl FrontEnd {
             saves: None,
             options: Options::default(),
             key_names: Vec::new(),
+            display_sizes: [Vec::new(), Vec::new()],
             option_screen: OptionScreen::default(),
             movies: None,
             credits: None,
@@ -883,13 +890,35 @@ pub struct Options {
     /// 0x508D78 (gamma), in steps of 0x4DC01C from its default.
     pub gamma: i32,
     pub animated_textures: bool,
+    /// Deviation (owner's request): windowed or fullscreen, and the size ([0, 0]: the
+    /// monitor's own, in fullscreen).
+    pub fullscreen: bool,
+    pub resolution: [u32; 2],
 }
 
 impl Default for Options {
     fn default() -> Options {
         // 0x49D910's start-up levels; 0x508D70 = 7, detail level 2.
-        Options { music: 8, sfx: 8, lens_flare: true, detail: 2, gamma: 0, animated_textures: true }
+        Options { music: 8, sfx: 8, lens_flare: true, detail: 2, gamma: 0, animated_textures: true, fullscreen: false, resolution: [1280, 720] }
     }
+}
+
+/// The graphics page's rows: the original's four, then display mode and resolution.
+const GFX_ROWS: i32 = 6;
+
+/// The resolution row's words.
+fn resolution_text(r: [u32; 2]) -> String {
+    if r == [0, 0] { "resolution native".to_string() } else { format!("resolution {} x {}", r[0], r[1]) }
+}
+
+/// `r` stepped `by` through `sizes` (from the nearest there, by area, when it isn't one).
+pub fn step_size(sizes: &[[u32; 2]], r: [u32; 2], by: i32) -> [u32; 2] {
+    if sizes.is_empty() {
+        return r;
+    }
+    let area = |s: [u32; 2]| if s == [0, 0] { u64::MAX } else { s[0] as u64 * s[1] as u64 };
+    let at = sizes.iter().position(|&s| s == r).unwrap_or_else(|| (0..sizes.len()).min_by_key(|&k| area(sizes[k]).abs_diff(area(r))).unwrap_or(0));
+    sizes[(at as i32 + by).clamp(0, sizes.len() as i32 - 1) as usize]
 }
 
 /// 0x4F6BD4: the options' rows (y), the entries around them for the arrows' travel.
@@ -985,15 +1014,19 @@ impl OptionScreen {
                 small_text(q, sprites, 0xBE, "jump accept cancel go back");
             }
             _ => {
+                // The original's four rows were 0x19 apart from 0x4B; with the display rows
+                // (a deviation) they are 0x14 apart from 0x46.
                 option_text(q, sprites, 0x32, "graphics configuration");
-                option_text(q, sprites, 0x4B, if o.lens_flare { "lens flare on" } else { "lens flare off" });
-                option_text(q, sprites, 100, ["low detail", "medium detail", "high detail"][o.detail.clamp(0, 2) as usize]);
-                option_text(q, sprites, 0x7D, ["gamma correction normal", "gamma correction medium", "gamma correction high"][o.gamma.clamp(0, 2) as usize]);
-                option_text(q, sprites, 0x96, if o.animated_textures { "animated textures on" } else { "animated textures off" });
-                let y = self.gfx_row * 0x19 + 0x48;
+                option_text(q, sprites, 0x46, if o.lens_flare { "lens flare on" } else { "lens flare off" });
+                option_text(q, sprites, 0x5A, ["low detail", "medium detail", "high detail"][o.detail.clamp(0, 2) as usize]);
+                option_text(q, sprites, 0x6E, ["gamma correction normal", "gamma correction medium", "gamma correction high"][o.gamma.clamp(0, 2) as usize]);
+                option_text(q, sprites, 0x82, if o.animated_textures { "animated textures on" } else { "animated textures off" });
+                option_text(q, sprites, 0x96, if o.fullscreen { "display fullscreen" } else { "display windowed" });
+                option_text(q, sprites, 0xAA, &resolution_text(o.resolution));
+                let y = self.gfx_row * 0x14 + 0x43;
                 put(q, sprites, 320.0, 0x32, y, 0x38, 3, [0xFF; 3], 0xFF, 0x800, 0x800);
                 put(q, sprites, 320.0, 0xFF, y, 0x38, 2, [0xFF; 3], 0xFF, 0x800, 0x800);
-                small_text(q, sprites, 0xBA, "jump accept cancel go back");
+                small_text(q, sprites, 0xC4, "jump accept cancel go back");
             }
         }
     }
@@ -1004,7 +1037,13 @@ fn option_text(q: &mut Vec<Quad>, sprites: &[Option<SpriteDef>], y: i32, s: &str
     let mut x = (0x28 - s.len() as i32) * 4;
     for c in s.bytes() {
         if c != b' ' {
-            let cell = if c == b'\'' { 0x2F } else { c.wrapping_add(0x9F) as usize };
+            let cell = match c {
+                b'\'' => 0x2F,
+                // Deviation (the display rows): the font's digits, 1–9 then 0, are cells 35–44.
+                b'0' => 44,
+                b'1'..=b'9' => (c - b'1') as usize + 35,
+                _ => c.wrapping_add(0x9F) as usize,
+            };
             put(q, sprites, 320.0, x, y, 0x43, cell, [0x80; 3], 0xFF, 0x800, 0x800);
         }
         x += 8;
@@ -1170,7 +1209,7 @@ impl FrontEnd {
                                     self.events.push(Event::Sound(0));
                                 }
                                 if held(Pad::DOWN) {
-                                    s.gfx_row = (s.gfx_row + 1).min(3);
+                                    s.gfx_row = (s.gfx_row + 1).min(GFX_ROWS - 1);
                                     s.gfx_wait = 0xF;
                                     self.events.push(Event::Sound(0));
                                 }
@@ -1183,6 +1222,16 @@ impl FrontEnd {
                                         2 if held(Pad::LEFT) => self.options.gamma = (self.options.gamma - 1).max(0),
                                         2 => self.options.gamma = (self.options.gamma + 1).min(2),
                                         3 => self.options.animated_textures = !self.options.animated_textures,
+                                        4 => {
+                                            let o = &mut self.options;
+                                            o.fullscreen = !o.fullscreen;
+                                            o.resolution = if o.fullscreen { [0, 0] } else { step_size(&self.display_sizes[0], o.resolution, 0) };
+                                        }
+                                        5 => {
+                                            let o = &mut self.options;
+                                            let by = if held(Pad::LEFT) { -1 } else { 1 };
+                                            o.resolution = step_size(&self.display_sizes[o.fullscreen as usize], o.resolution, by);
+                                        }
                                         _ => {}
                                     }
                                 }
@@ -1201,7 +1250,17 @@ impl FrontEnd {
             self.events.push(Event::Volumes { music: o.music, sfx: o.sfx });
             self.events.push(Event::LensFlare(o.lens_flare));
             self.events.push(Event::Graphics { detail: o.detail, gamma: o.gamma, animated_textures: o.animated_textures });
+            if (o.fullscreen, o.resolution) != (before.fullscreen, before.resolution) {
+                self.events.push(Event::Display { fullscreen: o.fullscreen, resolution: o.resolution });
+            }
         }
+    }
+
+    /// Capture tools: the options' graphics page.
+    pub fn show_graphics_page(&mut self) {
+        self.enter(Screen::Options);
+        self.option_screen.page = Some(3);
+        self.option_screen.saved = Some(self.options);
     }
 
     /// Capture tools: the film viewer with every film seen.
@@ -2347,6 +2406,32 @@ mod tests {
         assert!(f.started, "continue game");
         assert_eq!((f.progress.tokens[1], f.progress.tokens[2], f.level), (1, 4, 2));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_graphics_page_switches_display_mode_and_resolution() {
+        let mut f = FrontEnd::new(tables());
+        f.display_sizes = [vec![[1280, 720], [1920, 1080], [2560, 1440]], vec![[1920, 1080], [0, 0]]];
+        f.show_graphics_page();
+        let press = |f: &mut FrontEnd, b: u32| {
+            for _ in 0..0x10 {
+                f.tick(Pad(0));
+            }
+            f.tick(Pad(b));
+        };
+        for _ in 0..5 {
+            press(&mut f, Pad::DOWN);
+        }
+        f.events.clear();
+        press(&mut f, Pad::RIGHT);
+        assert_eq!(f.options.resolution, [1920, 1080]);
+        press(&mut f, Pad::UP);
+        press(&mut f, Pad::RIGHT);
+        assert!(f.options.fullscreen);
+        assert_eq!(f.options.resolution, [0, 0], "fullscreen starts at the monitor's own size");
+        let shown: Vec<_> = f.events.iter().filter_map(|e| if let Event::Display { fullscreen, resolution } = e { Some((*fullscreen, *resolution)) } else { None }).collect();
+        assert_eq!(shown, vec![(false, [1920, 1080]), (true, [0, 0])]);
+        assert_eq!(step_size(&f.display_sizes[0], [1600, 900], 0), [1280, 720], "an unlisted size goes to the nearest by area");
     }
 
     #[test]

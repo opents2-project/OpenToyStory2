@@ -295,7 +295,7 @@ A few things are deliberately different, mostly to fix what looked wrong when dr
 - Inside the shield's energy ball Buzz picks up no slime footprints.
 - Blended level faces that are fully opaque (level 2's leaves and bushes) are drawn alpha-tested with depth writes.
 - Special objects (lifts, platforms) are drawn between game ticks like Buzz and the camera.
-- Borderless fullscreen (F11, Alt+Enter, `--fullscreen`).
+- Display settings: the options' graphics page has two extra rows, windowed or fullscreen and the resolution (window sizes up to the monitor's, 8K included; in fullscreen the monitor's own modes, or native for borderless). F11 / Alt+Enter toggle borderless fullscreen at any time, `--fullscreen` starts in it, and the choice is kept in `display.txt` beside the saves.
 - Saves go to `%APPDATA%\ts2-rust` instead of beside the game, which is usually read-only. They use the original's `Toy2NN.sav` format, so saves copy between the two.
 - Mods (opt-in, `--mod <dir>` or the launcher): `[play_as]` draws the player as another creature with Buzz's moves retargeted (Woody, with a revolver; Zurg's spring robot and the Tin Man as bouncing players); `[first_person]` turns first person into a shooter; `[skate]` puts Buzz on level 7's skateboard, drawn from clips the mod supplies. The default game is unchanged. See [mods/README.md](../mods/README.md).
 
