@@ -81,7 +81,7 @@ Yes. OpenToyStory2 contains none of the game's levels, characters, sounds, music
 No. It's an unofficial project made by fans, and it isn't affiliated with or endorsed by Disney, Pixar, Traveller's Tales or Activision.
 
 **How was it made?**
-The original game's workings were reverse engineered and then written again from scratch in the Rust programming language. None of the original program code is used. It was written with extensive help from Claude Opus 5.5.
+The original game's workings were reverse engineered and then written again from scratch in the Rust programming language. None of the original program code is used.
 
 **Does it work on Mac or Linux?**
 Not yet. Windows only for now.
