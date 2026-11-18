@@ -10,9 +10,14 @@ OpenToyStory2 is a free, fan-made remake of the engine behind the 1999 PC game *
 
 **Beta:** All 15 levels can be played from start to finish, but levels 2 to 15 are still being tested and polished. Expect the odd bug.
 
-## Download Here:
+## Download here (Windows only):
 
-https://github.com/opents2-project/OpenToyStory2/releases/download/v0.1.0/OpenToyStory2-0.1.0-setup.exe
+[![Download for Windows](https://img.shields.io/badge/Download-Windows%20installer-2ea44f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/opents2-project/OpenToyStory2/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/opents2-project/OpenToyStory2?style=for-the-badge)](https://github.com/opents2-project/OpenToyStory2/releases/latest)
+
+## Trailer:
+
+[![OpenToyStory2 launch trailer](https://img.youtube.com/vi/KOCBkjdf0J0/maxresdefault.jpg)](https://www.youtube.com/watch?v=KOCBkjdf0J0)
 
 ## What you get
 
@@ -24,7 +29,7 @@ https://github.com/opents2-project/OpenToyStory2/releases/download/v0.1.0/OpenTo
 
 ![The OpenToyStory2 launcher](assets/readme/ui.jpg)
 
-## Getting started
+## Getting started:
 
 You'll need:
 
@@ -43,7 +48,7 @@ Your settings and mods are kept in `%APPDATA%\OpenToyStory2` and your saves in `
 
 ![Gameplay](assets/readme/gameplay.png)
 
-## Controls
+## Controls:
 
 | Key | What it does |
 |---|---|
@@ -57,7 +62,7 @@ Your settings and mods are kept in `%APPDATA%\OpenToyStory2` and your saves in `
 | V | Switch between the original camera and a free camera |
 | F11 or Alt+Enter | Fullscreen on or off; the resolution and display mode are also under Options, Configure GFX |
 
-## Mods
+## Mods:
 
 Mods come with the launcher. Open the **Mods** tab, tick the ones you want and press **Play Full Game Modded**. You can also try them on a single level with the **Level Tester**.
 
@@ -72,7 +77,7 @@ Want to make your own? Mods are small text files that point at the game's own ch
 
 ![The Play as Woody mod](assets/readme/modgameplay.png)
 
-## Questions
+## Questions:
 
 **Do I need the original game?**
 Yes. OpenToyStory2 contains none of the game's levels, characters, sounds, music or movies. They're all loaded from your copy when you play, and we can't host the game for legal reasons.
