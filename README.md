@@ -12,7 +12,7 @@ OpenToyStory2 is a free, fan-made remake of the engine behind the 1999 PC game *
 
 ## Download here (Windows only):
 
-[![Download for Windows](https://img.shields.io/badge/Download-Windows%20installer-2ea44f?style=for-the-badge&logo=windows&logoColor=white)]([https://github.com/opents2-project/OpenToyStory2/releases/latest](https://github.com/opents2-project/OpenToyStory2/releases/download/v0.1.0/OpenToyStory2-0.1.0-setup.exe))
+[![Download for Windows](https://img.shields.io/badge/Download-Windows%20installer-2ea44f?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/opents2-project/OpenToyStory2/releases/download/v0.1.0/OpenToyStory2-0.1.0-setup.exe)
 [![Latest release](https://img.shields.io/github/v/release/opents2-project/OpenToyStory2?style=for-the-badge)](https://github.com/opents2-project/OpenToyStory2/releases/latest)
 
 ## Trailer:
